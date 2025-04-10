@@ -50,7 +50,7 @@ A React application for managing participant types and participants in a worksho
 1. Open phpMyAdmin (http://localhost/phpmyadmin)
 2. Create a new database:
    ```sql
-   CREATE DATABASE schrauber_verwaltung;
+   CREATE DATABASE production_line_management_db;
    ```
 3. Import the database schema:
    - Go to the Import tab
@@ -82,7 +82,7 @@ A React application for managing participant types and participants in a worksho
      host: 'localhost',
      user: 'root',  // default XAMPP MySQL user
      password: '',  // default XAMPP MySQL password
-     database: 'schrauber_verwaltung',
+     database: 'production_line_management_db',
      waitForConnections: true,
      connectionLimit: 10,
      queueLimit: 0
