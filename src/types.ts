@@ -1,13 +1,12 @@
 export interface ParticipantType {
-  id: number;
+  id_PT: number;
   name: string;
-  description?: string;
 }
 
 export interface Participant {
-  id: number;
+  id_Participant: number;
   name: string;
-  type_id: number;
+  id_Type: number;
   attributes: Record<string, string>;
   created_at: string;
 }

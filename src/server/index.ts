@@ -1,12 +1,17 @@
 import express from 'express';
 import cors from 'cors';
-import participantTypesRouter from './routes/participantTypes';
+import participantTypesRouter from './routes/participantTypes.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+
+// Test route
+app.get('/', (req, res) => {
+  res.json({ message: 'Server is running!' });
+});
 
 // Routes
 app.use('/api/participant-types', participantTypesRouter);

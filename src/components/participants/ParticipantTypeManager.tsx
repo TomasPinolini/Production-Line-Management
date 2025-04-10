@@ -10,8 +10,7 @@ export const ParticipantTypeManager: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [editingType, setEditingType] = useState<ParticipantType | null>(null);
   const [formData, setFormData] = useState({
-    name: '',
-    description: ''
+    name: ''
   });
 
   useEffect(() => {
@@ -40,7 +39,7 @@ export const ParticipantTypeManager: React.FC = () => {
     try {
       let response;
       if (editingType) {
-        response = await fetch(`${API_BASE_URL}/participant-types/${editingType.id}`, {
+        response = await fetch(`${API_BASE_URL}/participant-types/${editingType.id_PT}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(formData)
@@ -57,7 +56,7 @@ export const ParticipantTypeManager: React.FC = () => {
         throw new Error('Failed to save participant type');
       }
 
-      setFormData({ name: '', description: '' });
+      setFormData({ name: '' });
       setEditingType(null);
       toast.success(editingType ? 'Participant type updated successfully' : 'Participant type created successfully');
       loadParticipantTypes();
@@ -70,8 +69,7 @@ export const ParticipantTypeManager: React.FC = () => {
   const handleEdit = (type: ParticipantType) => {
     setEditingType(type);
     setFormData({
-      name: type.name,
-      description: type.description || ''
+      name: type.name
     });
   };
 
@@ -81,7 +79,7 @@ export const ParticipantTypeManager: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/participant-types/${type.id}`, {
+      const response = await fetch(`${API_BASE_URL}/participant-types/${type.id_PT}`, {
         method: 'DELETE'
       });
 
@@ -123,22 +121,6 @@ export const ParticipantTypeManager: React.FC = () => {
                 />
               </div>
             </div>
-
-            <div className="sm:col-span-3">
-              <label htmlFor="description" className="block text-sm font-medium leading-6 text-gray-900">
-                Description
-              </label>
-              <div className="mt-2">
-                <input
-                  type="text"
-                  name="description"
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-                />
-              </div>
-            </div>
           </div>
         </div>
         <div className="flex items-center justify-end gap-x-6 border-t border-gray-900/10 px-4 py-4 sm:px-8">
@@ -147,7 +129,7 @@ export const ParticipantTypeManager: React.FC = () => {
               type="button"
               onClick={() => {
                 setEditingType(null);
-                setFormData({ name: '', description: '' });
+                setFormData({ name: '' });
               }}
               className="text-sm font-semibold leading-6 text-gray-900"
             >
@@ -172,9 +154,6 @@ export const ParticipantTypeManager: React.FC = () => {
               <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">
                 Name
               </th>
-              <th scope="col" className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900">
-                Description
-              </th>
               <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
                 <span className="sr-only">Actions</span>
               </th>
@@ -182,12 +161,9 @@ export const ParticipantTypeManager: React.FC = () => {
           </thead>
           <tbody className="divide-y divide-gray-200">
             {types.map((type) => (
-              <tr key={type.id}>
+              <tr key={type.id_PT}>
                 <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
                   {type.name}
-                </td>
-                <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                  {type.description || '-'}
                 </td>
                 <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                   <div className="flex justify-end gap-2">
@@ -209,7 +185,7 @@ export const ParticipantTypeManager: React.FC = () => {
             ))}
             {types.length === 0 && (
               <tr>
-                <td colSpan={3} className="text-center py-4 text-sm text-gray-500">
+                <td colSpan={2} className="text-center py-4 text-sm text-gray-500">
                   No participant types found
                 </td>
               </tr>
