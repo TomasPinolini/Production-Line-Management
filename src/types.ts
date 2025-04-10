@@ -1,28 +1,29 @@
 export interface ParticipantType {
   id_PT: number;
   name: string;
+  attributes?: VariableAttribute[];
 }
 
 export interface Participant {
   id_Participant: number;
   name: string;
   id_Type: number;
-  attributes: Record<string, string>;
-  created_at: string;
+  attributes?: ParticipantAttribute[];
 }
 
 export interface VariableAttribute {
-  id: number;
+  id_VA: number;
+  id_Type: number;
   name: string;
-  type_id: number;
   formatData: string;
 }
 
-export interface AttributeValue {
-  participant_id: number;
-  attribute_id: number;
+export interface ParticipantAttribute {
+  id_U: number;
+  id_Participant: number;
+  id_Attribute: number;
   value: string;
-  timestamp: string;
+  ts?: string;
 }
 
 // Helper type for form handling

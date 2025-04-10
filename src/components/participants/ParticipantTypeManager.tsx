@@ -1,97 +1,101 @@
 import React, { useState, useEffect } from 'react';
 import { Plus, Pencil, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { ParticipantType } from '../../types';
+import { ParticipantType, VariableAttribute } from '../../types';
+import VariableAttributeManager from './VariableAttributeManager';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
 export const ParticipantTypeManager: React.FC = () => {
-  const [types, setTypes] = useState<ParticipantType[]>([]);
+  const [participantTypes, setParticipantTypes] = useState<ParticipantType[]>([]);
+  const [newType, setNewType] = useState({ name: '' });
+  const [selectedType, setSelectedType] = useState<ParticipantType | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editingType, setEditingType] = useState<ParticipantType | null>(null);
-  const [formData, setFormData] = useState({
-    name: ''
-  });
 
   useEffect(() => {
-    loadParticipantTypes();
+    fetchParticipantTypes();
   }, []);
 
-  const loadParticipantTypes = async () => {
+  const fetchParticipantTypes = async () => {
     try {
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/participant-types`);
-      if (!response.ok) {
-        throw new Error('Failed to load participant types');
-      }
+      if (!response.ok) throw new Error('Failed to fetch participant types');
       const data = await response.json();
-      setTypes(data);
-    } catch (error) {
-      console.error('Failed to load participant types:', error);
-      toast.error('Failed to load participant types');
+      // Transform the data to match our expected format
+      const transformedData = data.map((type: any) => ({
+        id_PT: type.id,
+        name: type.name,
+        attributes: type.attributes || []
+      }));
+      console.log('Fetched participant types:', transformedData);
+      setParticipantTypes(transformedData);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load participant types';
+      setError(message);
+      console.error('Error fetching participant types:', err);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleAddType = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      let response;
-      if (editingType) {
-        response = await fetch(`${API_BASE_URL}/participant-types/${editingType.id_PT}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
-        });
-      } else {
-        response = await fetch(`${API_BASE_URL}/participant-types`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(formData)
-        });
-      }
-
-      if (!response.ok) {
-        throw new Error('Failed to save participant type');
-      }
-
-      setFormData({ name: '' });
-      setEditingType(null);
-      toast.success(editingType ? 'Participant type updated successfully' : 'Participant type created successfully');
-      loadParticipantTypes();
-    } catch (error) {
-      console.error('Failed to save participant type:', error);
-      toast.error('Failed to save participant type');
-    }
-  };
-
-  const handleEdit = (type: ParticipantType) => {
-    setEditingType(type);
-    setFormData({
-      name: type.name
-    });
-  };
-
-  const handleDelete = async (type: ParticipantType) => {
-    if (!window.confirm('Are you sure you want to delete this participant type?')) {
-      return;
-    }
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/participant-types/${type.id_PT}`, {
-        method: 'DELETE'
+      const response = await fetch(`${API_BASE_URL}/participant-types`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(newType),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to delete participant type');
-      }
+      if (!response.ok) throw new Error('Failed to add participant type');
+      
+      const addedType = await response.json();
+      // Transform the response to match our expected format
+      const transformedType = {
+        id_PT: addedType.id,
+        name: addedType.name,
+        attributes: []
+      };
+      setParticipantTypes([...participantTypes, transformedType]);
+      setNewType({ name: '' });
+      toast.success('Participant type added successfully');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to add participant type';
+      setError(message);
+      console.error('Error adding participant type:', err);
+      toast.error(message);
+    }
+  };
 
+  const handleDeleteType = async (id: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/participant-types/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('Failed to delete participant type');
+      
+      setParticipantTypes(participantTypes.filter(type => type.id_PT !== id));
+      if (selectedType?.id_PT === id) {
+        setSelectedType(null);
+      }
       toast.success('Participant type deleted successfully');
-      loadParticipantTypes();
-    } catch (error) {
-      console.error('Failed to delete participant type:', error);
-      toast.error('Failed to delete participant type');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete participant type';
+      setError(message);
+      console.error('Error deleting participant type:', err);
+      toast.error(message);
+    }
+  };
+
+  const handleAttributesChange = (attributes: VariableAttribute[]) => {
+    if (selectedType) {
+      setSelectedType({ ...selectedType, attributes });
     }
   };
 
@@ -101,98 +105,83 @@ export const ParticipantTypeManager: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      {/* Add/Edit Form */}
-      <form onSubmit={handleSubmit} className="bg-white shadow-sm ring-1 ring-gray-900/5 sm:rounded-xl md:col-span-2">
-        <div className="px-4 py-6 sm:p-8">
-          <div className="grid grid-cols-1 gap-x-6 gap-y-8 sm:grid-cols-6">
-            <div className="sm:col-span-3">
-              <label htmlFor="name" className="block text-sm font-medium leading-6 text-gray-900">
-                Name
-              </label>
-              <div className="mt-2">
-                <input
-                  type="text"
-                  name="name"
-                  id="name"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="block w-full rounded-md border-0 py-1.5 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
-                  required
-                />
-              </div>
-            </div>
+      <div className="bg-white shadow rounded-lg p-6">
+        <h2 className="text-xl font-semibold mb-4">Participant Types</h2>
+        
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
+            {error}
           </div>
-        </div>
-        <div className="flex items-center justify-end gap-x-6 border-t border-gray-900/10 px-4 py-4 sm:px-8">
-          {editingType && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditingType(null);
-                setFormData({ name: '' });
-              }}
-              className="text-sm font-semibold leading-6 text-gray-900"
-            >
-              Cancel
-            </button>
-          )}
-          <button
-            type="submit"
-            className="flex items-center rounded-md bg-blue-600 px-3 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-500 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-          >
-            <Plus className="h-4 w-4 mr-2" />
-            {editingType ? 'Update' : 'Add'} Participant Type
-          </button>
-        </div>
-      </form>
+        )}
 
-      {/* Types List */}
-      <div className="bg-white shadow-sm ring-1 ring-gray-900/5 sm:rounded-xl">
-        <table className="min-w-full divide-y divide-gray-300">
-          <thead>
-            <tr>
-              <th scope="col" className="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6">
-                Name
-              </th>
-              <th scope="col" className="relative py-3.5 pl-3 pr-4 sm:pr-6">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-200">
-            {types.map((type) => (
-              <tr key={type.id_PT}>
-                <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
-                  {type.name}
-                </td>
-                <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={() => handleEdit(type)}
-                      className="text-blue-600 hover:text-blue-900"
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(type)}
-                      className="text-red-600 hover:text-red-900"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {types.length === 0 && (
-              <tr>
-                <td colSpan={2} className="text-center py-4 text-sm text-gray-500">
-                  No participant types found
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+        <form onSubmit={handleAddType} className="mb-6">
+          <div className="flex gap-4">
+            <input
+              type="text"
+              value={newType.name}
+              onChange={(e) => setNewType({ name: e.target.value })}
+              placeholder="New participant type name"
+              className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
+            />
+            <button
+              type="submit"
+              className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+            >
+              Add Type
+            </button>
+          </div>
+        </form>
+
+        <div className="space-y-4">
+          {participantTypes.length === 0 ? (
+            <p className="text-gray-500 text-center py-4">No participant types found</p>
+          ) : (
+            participantTypes.map((type) => (
+              <div
+                key={type.id_PT}
+                className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
+              >
+                <span className="font-medium">{type.name}</span>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setSelectedType(type)}
+                    className="text-blue-600 hover:text-blue-800"
+                  >
+                    Manage Attributes
+                  </button>
+                  <button
+                    onClick={() => handleDeleteType(type.id_PT)}
+                    className="text-red-600 hover:text-red-800"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
+
+      {selectedType && (
+        <div className="bg-white shadow rounded-lg p-6">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-lg font-medium">
+              Managing Attributes for: {selectedType.name}
+            </h3>
+            <button
+              onClick={() => setSelectedType(null)}
+              className="text-gray-600 hover:text-gray-800"
+            >
+              Close
+            </button>
+          </div>
+          <VariableAttributeManager
+            participantTypeId={selectedType.id_PT}
+            onAttributesChange={handleAttributesChange}
+          />
+        </div>
+      )}
     </div>
   );
 }; 
