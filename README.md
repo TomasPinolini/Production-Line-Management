@@ -1,135 +1,97 @@
-# Production Line Management System
+# Production Line Management App
 
-A web-based system for managing production lines, participants, and their attributes.
+A modern web application for managing production line participants, types, and attributes. Built with React, TypeScript, and MySQL.
 
 ## Features
 
-- Participant Type Management
-  - Create, read, update, and delete participant types
-  - Manage variable attributes for each participant type
-  - Support for formatted data validation (MAC addresses, IP addresses, etc.)
-- Participant Management
-  - Create and manage participants for each type
-  - Track participant attributes with format validation
-  - Real-time validation of attribute values
+- Manage participant types and their attributes
+- Track participants with custom attributes
+- Real-time validation of attribute values
+- Responsive and modern UI
+- RESTful API backend
 
 ## Tech Stack
 
 - Frontend:
-  - React 18
+  - React
   - TypeScript
-  - Tailwind CSS
+  - TailwindCSS
   - React Router
   - React Hot Toast
-  - Lucide React (icons)
-  - Vite (build tool)
 
 - Backend:
   - Node.js
   - Express
   - MySQL
   - TypeScript
-  - CORS
 
-## Prerequisites
+## Getting Started
 
-- Node.js (v18 or higher)
-- XAMPP (for MySQL and Apache)
-- Git
-- A code editor (e.g., VS Code)
+### Prerequisites
 
-## Installation
+- Node.js (v14 or higher)
+- MySQL Server
+- XAMPP (optional)
 
-### 1. Install XAMPP
-1. Download and install XAMPP from https://www.apachefriends.org/
-2. Start Apache and MySQL services from XAMPP Control Panel
+### Installation
 
-### 2. Set Up Database
-1. Open phpMyAdmin (http://localhost/phpmyadmin)
-2. Go to the Import tab
-3. Select the file `src/server/sql/setup_database.sql`
-4. Click "Go" to import
-   - This will create the database and all required tables
-   - If you see any errors about the database already existing, you can ignore them
-
-Note: If you prefer using the MySQL command line:
+1. Clone the repository:
 ```bash
-mysql -u root < src/server/sql/setup_database.sql
+git clone https://github.com/YourUsername/production-line-management
+cd production-line-management
 ```
 
-### 3. Clone and Set Up the Project
-1. Open a terminal and navigate to XAMPP's htdocs folder:
-   ```bash
-   cd C:\xampp\htdocs
-   ```
+2. Install dependencies:
+```bash
+npm install
+```
 
-2. Clone the repository:
-   ```bash
-   git clone https://github.com/TomasPinolini/Production-Line-Management
-   cd Production-Line-Management
-   ```
+3. Create a MySQL database and update the connection settings in `src/server/db.ts`
 
-3. Install dependencies:
-   ```bash
-   npm install
-   ```
+4. Start the development servers:
 
-### 4. Start the Application
+Frontend:
+```bash
+npm run dev
+```
 
-1. Start the backend server:
-   ```bash
-   npm run server
-   ```
-
-2. In a new terminal, start the frontend development server:
-   ```bash
-   npm run dev
-   ```
-
-3. Open your browser and navigate to:
-   - Frontend: http://localhost:5173
-   - Backend API: http://localhost:3000
+Backend:
+```bash
+npm run server
+```
 
 ## Project Structure
 
 ```
-Production-Line-Management/
-├── src/
-│   ├── components/     # React components
-│   ├── server/        # Backend server code
-│   │   ├── routes/    # API routes
-│   │   ├── sql/       # Database scripts
-│   │   └── utils/     # Utility functions
-│   └── types/         # TypeScript type definitions
-├── public/            # Static files
-└── package.json       # Project dependencies
+src/
+├── components/        # React components
+├── server/           # Backend server code
+│   ├── routes/      # API routes
+│   ├── utils/       # Utility functions
+│   └── db.ts        # Database configuration
+├── types/           # TypeScript type definitions
+└── App.tsx          # Main application component
 ```
 
-## Development
+## API Endpoints
 
-- Backend code is in TypeScript under `src/server/`
-- Frontend React components are in `src/components/`
-- Database schema is in `src/server/sql/setup_database.sql`
-- API routes are defined in `src/server/routes/`
-
-## Common Issues
-
-1. If you see "no database selected":
-   - Make sure you've imported the SQL file in phpMyAdmin
-   - Check that the database name in `src/server/db.ts` matches your setup
-
-2. If the server won't start:
-   - Ensure XAMPP's MySQL service is running
-   - Check if another process is using port 3000
-   - Make sure all dependencies are installed (`npm install`)
-
-3. If changes aren't showing:
-   - For backend changes: restart the server (`npm run server`)
-   - For frontend changes: refresh the browser
+- `GET /api/participant-types` - Get all participant types
+- `POST /api/participant-types` - Create a new participant type
+- `GET /api/participant-types/:id/attributes` - Get attributes for a participant type
+- `POST /api/participant-types/:id/attributes` - Add attribute to a participant type
+- `GET /api/participants` - Get all participants
+- `POST /api/participants` - Create a new participant
+- `GET /api/participants/:id/attributes` - Get participant attributes
+- `POST /api/participants/:id/attributes` - Add attribute value to participant
 
 ## Contributing
 
-1. Create a new branch for your feature
-2. Make your changes
-3. Test thoroughly
-4. Submit a pull request 
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details. 
