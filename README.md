@@ -48,14 +48,16 @@ A React application for managing participant types and participants in a worksho
 
 ### 2. Set Up Database
 1. Open phpMyAdmin (http://localhost/phpmyadmin)
-2. Create a new database:
-   ```sql
-   CREATE DATABASE production_line_management_db;
-   ```
-3. Import the database schema:
-   - Go to the Import tab
-   - Select the file `src/server/sql/create_tables.sql`
-   - Click "Go" to import
+2. Go to the Import tab
+3. Select the file `src/server/sql/setup_database.sql`
+4. Click "Go" to import
+   - This will create the database and all required tables
+   - If you see any errors about the database already existing, you can ignore them
+
+Note: If you prefer using the MySQL command line:
+```bash
+mysql -u root < src/server/sql/setup_database.sql
+```
 
 ### 3. Clone and Set Up the Project
 1. Open terminal/command prompt
