@@ -9,7 +9,7 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
     "build:server": "tsc -p tsconfig.server.json",
-    "start:server": "echo '⚙️ Starting Backend Server...' && node dist/server/index.js",
+    "start:server": "echo '⚙️ Starting Backend Server...' && cross-env NODE_ENV=production node dist/server/index.js",
     "server": "npm run build:server && npm run start:server"
   },
   "dependencies": {
@@ -17,6 +17,7 @@
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.1",
     "cors": "^2.8.5",
+    "cross-env": "^7.0.3",
     "express": "^5.1.0",
     "express-async-handler": "^1.2.0",
     "lucide-react": "^0.487.0",
