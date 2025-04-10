@@ -33,4 +33,4 @@ dist-ssr
 
 # Database
 *.sql
-!src/server/sql/create_tables.sql
+!src/server/sql/setup_database.sql
