@@ -7,8 +7,13 @@ import ParticipantForm from './ParticipantForm';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
+interface AttributeValue {
+  id: number;
+  value: string;
+}
+
 interface ParticipantWithAttributes extends Participant {
-  attributeValues: Record<string, string>;
+  attributeValues: { [key: string]: string };
 }
 
 export const ParticipantList: React.FC = () => {
@@ -17,8 +22,8 @@ export const ParticipantList: React.FC = () => {
   const [type, setType] = useState<ParticipantType | null>(null);
   const [attributes, setAttributes] = useState<VariableAttribute[]>([]);
   const [participants, setParticipants] = useState<ParticipantWithAttributes[]>([]);
+  const [error, setError] = useState<boolean>(false);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   useEffect(() => {
@@ -26,10 +31,10 @@ export const ParticipantList: React.FC = () => {
       Promise.all([
         fetchType(parseInt(typeId)),
         fetchAttributes(parseInt(typeId)),
-        fetchParticipants(parseInt(typeId))
+        fetchParticipants()
       ]).catch(err => {
         console.error('Error loading data:', err);
-        setError('Failed to load data');
+        setError(true);
         toast.error('Failed to load data');
       }).finally(() => {
         setLoading(false);
@@ -42,8 +47,9 @@ export const ParticipantList: React.FC = () => {
     if (!response.ok) throw new Error('Failed to fetch participant type');
     const data = await response.json();
     setType({
-      id_PT: data.id,
+      id: data.id,
       name: data.name,
+      description: data.description,
       attributes: []
     });
   };
@@ -52,42 +58,27 @@ export const ParticipantList: React.FC = () => {
     const response = await fetch(`${API_BASE_URL}/participant-types/${id}/attributes`);
     if (!response.ok) throw new Error('Failed to fetch attributes');
     const data = await response.json();
-    const transformedAttributes = data.map((attr: any) => ({
-      id_VA: attr.id,
-      name: attr.name,
-      id_Type: attr.participant_type_id,
-      formatData: attr.formatData
-    }));
-    setAttributes(transformedAttributes);
+    setAttributes(data);
   };
 
-  const fetchParticipants = async (typeId: number) => {
-    const response = await fetch(`${API_BASE_URL}/participants?typeId=${typeId}`);
-    if (!response.ok) throw new Error('Failed to fetch participants');
-    const data = await response.json();
-    
-    // Fetch attribute values for each participant
-    const participantsWithAttributes = await Promise.all(
-      data.map(async (participant: any) => {
-        const valuesResponse = await fetch(`${API_BASE_URL}/participants/${participant.id_Participant}/attributes`);
-        if (!valuesResponse.ok) throw new Error('Failed to fetch participant attributes');
-        const values = await valuesResponse.json();
-        
-        const attributeValues: Record<string, string> = {};
-        values.forEach((value: any) => {
-          attributeValues[value.id_Attribute] = value.value;
-        });
-
-        return {
-          id_Participant: participant.id_Participant,
-          name: participant.name,
-          id_Type: participant.id_Type,
-          attributeValues
-        };
-      })
-    );
-
-    setParticipants(participantsWithAttributes);
+  const fetchParticipants = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/participants/type/${typeId}`);
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      // Transform the data to match our interface
+      const transformedData = data.map((participant: any) => ({
+        ...participant,
+        attributeValues: {}
+      }));
+      setParticipants(transformedData);
+    } catch (error) {
+      console.error('Failed to fetch participants:', error);
+      toast.error('Failed to load participants');
+      setError(true);
+    }
   };
 
   const handleBack = () => {
@@ -98,11 +89,11 @@ export const ParticipantList: React.FC = () => {
     setIsAddModalOpen(true);
   };
 
-  const handleSubmitParticipant = async (data: { name: string; attributes: Record<number, string> }) => {
+  const handleSubmitParticipant = async (data: { name: string; attributes: AttributeValue[] }) => {
     if (!typeId) return;
 
     try {
-      // Create the participant
+      // Create the participant with attributes in a single request
       const response = await fetch(`${API_BASE_URL}/participants`, {
         method: 'POST',
         headers: {
@@ -110,36 +101,41 @@ export const ParticipantList: React.FC = () => {
         },
         body: JSON.stringify({
           name: data.name,
-          id_Type: parseInt(typeId),
+          type_id: parseInt(typeId),
+          attributes: data.attributes
         }),
       });
 
       if (!response.ok) throw new Error('Failed to create participant');
-      const participant = await response.json();
-
-      // Add attribute values
-      const attributePromises = Object.entries(data.attributes).map(([attrId, value]) => 
-        fetch(`${API_BASE_URL}/participants/${participant.id_Participant}/attributes`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            id_VA: parseInt(attrId),
-            value: value,
-          }),
-        })
-      );
-
-      await Promise.all(attributePromises);
-
+      
       // Refresh the participants list
-      await fetchParticipants(parseInt(typeId));
+      await fetchParticipants();
       setIsAddModalOpen(false);
       toast.success('Participant added successfully');
     } catch (err) {
       console.error('Error adding participant:', err);
       toast.error('Failed to add participant');
+    }
+  };
+
+  const handleEditParticipant = (participant: ParticipantWithAttributes) => {
+    // Implement edit logic here
+  };
+
+  const handleDeleteParticipant = async (id: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/participants/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('Failed to delete participant');
+      
+      // Refresh the participants list
+      await fetchParticipants();
+      toast.success('Participant deleted successfully');
+    } catch (err) {
+      console.error('Error deleting participant:', err);
+      toast.error('Failed to delete participant');
     }
   };
 
@@ -154,7 +150,7 @@ export const ParticipantList: React.FC = () => {
   if (error || !type) {
     return (
       <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded">
-        {error || 'Failed to load participant type'}
+        {error ? 'Failed to load participant type' : 'Failed to load participant type'}
       </div>
     );
   }
@@ -220,7 +216,7 @@ export const ParticipantList: React.FC = () => {
                     </th>
                     {attributes.map((attr) => (
                       <th
-                        key={attr.id_VA}
+                        key={attr.id}
                         scope="col"
                         className="px-3 py-3.5 text-left text-sm font-semibold text-gray-900"
                       >
@@ -234,27 +230,29 @@ export const ParticipantList: React.FC = () => {
                 </thead>
                 <tbody className="divide-y divide-gray-200 bg-white">
                   {participants.map((participant) => (
-                    <tr key={participant.id_Participant}>
+                    <tr key={participant.id}>
                       <td className="whitespace-nowrap py-4 pl-4 pr-3 text-sm font-medium text-gray-900 sm:pl-6">
                         {participant.name}
                       </td>
                       {attributes.map((attr) => (
-                        <td key={attr.id_VA} className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                          {participant.attributeValues[attr.id_VA] || '-'}
+                        <td key={attr.id} className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
+                          {participant.attributes?.find(a => a.id === attr.id)?.value || '-'}
                         </td>
                       ))}
                       <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-6">
                         <button
+                          onClick={() => handleEditParticipant(participant)}
                           className="text-blue-600 hover:text-blue-900 mr-4"
-                          onClick={() => {/* TODO: Implement edit */}}
                         >
                           <Pencil className="w-4 h-4" />
+                          <span className="sr-only">Edit</span>
                         </button>
                         <button
+                          onClick={() => handleDeleteParticipant(participant.id)}
                           className="text-red-600 hover:text-red-900"
-                          onClick={() => {/* TODO: Implement delete */}}
                         >
                           <Trash2 className="w-4 h-4" />
+                          <span className="sr-only">Delete</span>
                         </button>
                       </td>
                     </tr>

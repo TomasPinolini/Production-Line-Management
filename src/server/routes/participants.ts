@@ -3,93 +3,201 @@ import asyncHandler from '../utils/asyncHandler';
 import pool from '../db.js';
 import { ResultSetHeader, RowDataPacket } from 'mysql2';
 
+interface AttributeValue {
+  id: number;
+  value: string;
+}
+
 const router = Router();
 
 // Get all participants
 router.get('/', asyncHandler(async (req: Request, res: Response) => {
   console.log('Fetching all participants...');
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant ORDER BY name ASC'
+    'SELECT p.*, pt.name as type_name FROM participant p ' +
+    'JOIN participant_type pt ON p.type_id = pt.id ' +
+    'ORDER BY p.name ASC'
   );
   console.log(`Found ${rows.length} participants`);
   res.json(rows);
 }));
 
-// Get a single participant
+// Get a single participant with their attributes
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   console.log(`Fetching participant with ID: ${id}`);
-  
-  const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant WHERE id_P = ?',
+
+  // Get participant basic info
+  const [participants] = await pool.query<RowDataPacket[]>(
+    'SELECT p.*, pt.name as type_name FROM participant p ' +
+    'JOIN participant_type pt ON p.type_id = pt.id ' +
+    'WHERE p.id = ?',
     [id]
   );
 
-  if (!rows[0]) {
+  if (!participants[0]) {
     console.log(`Participant with ID ${id} not found`);
     res.status(404).json({ message: 'Participant not found' });
     return;
   }
 
-  console.log('Successfully fetched participant:', rows[0]);
-  res.json(rows[0]);
+  const participant = participants[0];
+
+  // Get participant attributes
+  const [attributes] = await pool.query<RowDataPacket[]>(
+    'SELECT va.*, av.value FROM variable_attribute va ' +
+    'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
+    'WHERE va.type_id = ?',
+    [id, participant.type_id]
+  );
+
+  participant.attributes = attributes;
+  console.log('Successfully fetched participant with attributes');
+  res.json(participant);
 }));
 
 // Create a new participant
 router.post('/', asyncHandler(async (req: Request, res: Response) => {
-  const { name, id_Type } = req.body;
-  console.log('Creating new participant:', { name, id_Type });
+  const { name, type_id, attributes } = req.body;
+  console.log('Creating new participant:', { name, type_id });
 
-  if (!name || !id_Type) {
+  if (!name || !type_id) {
     console.log('Missing required fields');
-    res.status(400).json({ message: 'Name and participant type ID are required' });
+    res.status(400).json({ message: 'Name and type_id are required' });
     return;
   }
 
-  const [result] = await pool.query<ResultSetHeader>(
-    'INSERT INTO participant (name, id_Type) VALUES (?, ?)',
-    [name, id_Type]
-  );
+  // Start transaction
+  const connection = await pool.getConnection();
+  await connection.beginTransaction();
 
-  const [newParticipant] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant WHERE id_P = ?',
-    [result.insertId]
-  );
+  try {
+    // Insert participant
+    const [result] = await connection.query<ResultSetHeader>(
+      'INSERT INTO participant (name, type_id) VALUES (?, ?)',
+      [name, type_id]
+    );
+    const participantId = result.insertId;
 
-  console.log('Successfully created participant:', newParticipant[0]);
-  res.status(201).json(newParticipant[0]);
+    // Insert attribute values if provided
+    if (attributes && attributes.length > 0) {
+      const attributeValues = attributes.map((attr: AttributeValue) => [
+        participantId,
+        attr.id,
+        attr.value
+      ]);
+
+      await connection.query(
+        'INSERT INTO attribute_value (participant_id, attribute_id, value) VALUES ?',
+        [attributeValues]
+      );
+    }
+
+    await connection.commit();
+    
+    // Fetch the created participant with attributes
+    const [newParticipant] = await connection.query<RowDataPacket[]>(
+      'SELECT p.*, pt.name as type_name FROM participant p ' +
+      'JOIN participant_type pt ON p.type_id = pt.id ' +
+      'WHERE p.id = ?',
+      [participantId]
+    );
+
+    const [newAttributes] = await connection.query<RowDataPacket[]>(
+      'SELECT va.*, av.value FROM variable_attribute va ' +
+      'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
+      'WHERE va.type_id = ?',
+      [participantId, type_id]
+    );
+
+    newParticipant[0].attributes = newAttributes;
+    console.log('Successfully created participant:', newParticipant[0]);
+    res.status(201).json(newParticipant[0]);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }));
 
 // Update a participant
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, id_Type } = req.body;
-  console.log(`Updating participant ${id}:`, { name, id_Type });
+  const { name, type_id, attributes } = req.body;
+  console.log(`Updating participant ${id}:`, { name, type_id });
 
-  if (!name || !id_Type) {
+  if (!name || !type_id) {
     console.log('Missing required fields');
-    res.status(400).json({ message: 'Name and participant type ID are required' });
+    res.status(400).json({ message: 'Name and type_id are required' });
     return;
   }
 
-  const [result] = await pool.query<ResultSetHeader>(
-    'UPDATE participant SET name = ?, id_Type = ? WHERE id_P = ?',
-    [name, id_Type, id]
-  );
+  // Start transaction
+  const connection = await pool.getConnection();
+  await connection.beginTransaction();
 
-  if (result.affectedRows === 0) {
-    console.log(`Participant with ID ${id} not found`);
-    res.status(404).json({ message: 'Participant not found' });
-    return;
+  try {
+    // Update participant
+    const [result] = await connection.query<ResultSetHeader>(
+      'UPDATE participant SET name = ?, type_id = ? WHERE id = ?',
+      [name, type_id, id]
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      console.log(`Participant with ID ${id} not found`);
+      res.status(404).json({ message: 'Participant not found' });
+      return;
+    }
+
+    // Update attribute values
+    if (attributes && attributes.length > 0) {
+      // Delete existing attribute values
+      await connection.query(
+        'DELETE FROM attribute_value WHERE participant_id = ?',
+        [id]
+      );
+
+      // Insert new attribute values
+      const attributeValues = attributes.map((attr: AttributeValue) => [
+        id,
+        attr.id,
+        attr.value
+      ]);
+
+      await connection.query(
+        'INSERT INTO attribute_value (participant_id, attribute_id, value) VALUES ?',
+        [attributeValues]
+      );
+    }
+
+    await connection.commit();
+
+    // Fetch the updated participant with attributes
+    const [updatedParticipant] = await connection.query<RowDataPacket[]>(
+      'SELECT p.*, pt.name as type_name FROM participant p ' +
+      'JOIN participant_type pt ON p.type_id = pt.id ' +
+      'WHERE p.id = ?',
+      [id]
+    );
+
+    const [updatedAttributes] = await connection.query<RowDataPacket[]>(
+      'SELECT va.*, av.value FROM variable_attribute va ' +
+      'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
+      'WHERE va.type_id = ?',
+      [id, type_id]
+    );
+
+    updatedParticipant[0].attributes = updatedAttributes;
+    console.log('Successfully updated participant:', updatedParticipant[0]);
+    res.json(updatedParticipant[0]);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
-
-  const [updatedParticipant] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant WHERE id_P = ?',
-    [id]
-  );
-
-  console.log('Successfully updated participant:', updatedParticipant[0]);
-  res.json(updatedParticipant[0]);
 }));
 
 // Delete a participant
@@ -98,7 +206,7 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   console.log(`Deleting participant with ID: ${id}`);
 
   const [result] = await pool.query<ResultSetHeader>(
-    'DELETE FROM participant WHERE id_P = ?',
+    'DELETE FROM participant WHERE id = ?',
     [id]
   );
 
@@ -112,111 +220,54 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   res.status(204).end();
 }));
 
-// Get participant attributes
-router.get('/:id/attributes', asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  console.log(`Fetching attributes for participant: ${id}`);
+// Get participants by type
+router.get('/type/:typeId', asyncHandler(async (req: Request, res: Response) => {
+  const { typeId } = req.params;
+  console.log(`Fetching participants for type: ${typeId}`);
 
-  const [rows] = await pool.query<RowDataPacket[]>(
-    `SELECT va.id_VA, va.name, va.formatData, pva.value 
-     FROM variable_attribute va
-     LEFT JOIN participant_variable_attribute pva ON va.id_VA = pva.id_VA AND pva.id_P = ?
-     WHERE va.id_Type = (SELECT id_Type FROM participant WHERE id_P = ?)`,
-    [id, id]
+  // First get all participants of this type
+  const [participants] = await pool.query<RowDataPacket[]>(
+    'SELECT p.*, pt.name as type_name FROM participant p ' +
+    'JOIN participant_type pt ON p.type_id = pt.id ' +
+    'WHERE p.type_id = ? ' +
+    'ORDER BY p.name ASC',
+    [typeId]
   );
 
-  console.log(`Found ${rows.length} attributes`);
-  res.json(rows);
-}));
-
-// Update participant attributes
-router.put('/:id/attributes', asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const attributes = req.body;
-  console.log(`Updating attributes for participant ${id}:`, attributes);
-
-  if (!Array.isArray(attributes)) {
-    console.log('Invalid attributes format');
-    res.status(400).json({ message: 'Attributes must be an array' });
-    return;
-  }
-
-  // Start a transaction
-  const connection = await pool.getConnection();
-  await connection.beginTransaction();
-
-  try {
-    // Delete existing attributes
-    await connection.query(
-      'DELETE FROM participant_variable_attribute WHERE id_P = ?',
-      [id]
+  // Then get all attributes for these participants
+  const participantIds = participants.map(p => p.id);
+  if (participantIds.length > 0) {
+    const [attributes] = await pool.query<RowDataPacket[]>(
+      'SELECT va.*, av.value, av.participant_id FROM variable_attribute va ' +
+      'LEFT JOIN attribute_value av ON av.attribute_id = va.id ' +
+      'WHERE va.type_id = ? AND (av.participant_id IN (?) OR av.participant_id IS NULL)',
+      [typeId, participantIds]
     );
 
-    // Insert new attributes
-    for (const attr of attributes) {
-      await connection.query(
-        'INSERT INTO participant_variable_attribute (id_P, id_VA, value) VALUES (?, ?, ?)',
-        [id, attr.id_VA, attr.value]
-      );
-    }
+    // Group attributes by participant
+    const attributesByParticipant: { [key: number]: any[] } = {};
+    attributes.forEach(attr => {
+      if (attr.participant_id) {
+        if (!attributesByParticipant[attr.participant_id]) {
+          attributesByParticipant[attr.participant_id] = [];
+        }
+        attributesByParticipant[attr.participant_id].push({
+          id: attr.id,
+          name: attr.name,
+          value: attr.value,
+          format_data: attr.format_data
+        });
+      }
+    });
 
-    await connection.commit();
-    console.log(`Successfully updated attributes for participant ${id}`);
-    res.json({ message: 'Attributes updated successfully' });
-  } catch (error) {
-    await connection.rollback();
-    throw error;
-  } finally {
-    connection.release();
-  }
-}));
-
-// Add attribute value to a participant
-router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { id_VA, value } = req.body;
-  console.log('Adding attribute value:', { id, id_VA, value });
-
-  if (!id_VA || value === undefined) {
-    console.log('Missing required fields');
-    res.status(400).json({ message: 'Attribute ID and value are required' });
-    return;
+    // Add attributes to each participant
+    participants.forEach(participant => {
+      participant.attributes = attributesByParticipant[participant.id] || [];
+    });
   }
 
-  // Get the attribute format data to validate the value
-  const [attrRows] = await pool.query<RowDataPacket[]>(
-    'SELECT formatData FROM variable_attribute WHERE id_VA = ?',
-    [id_VA]
-  );
-
-  if (!attrRows.length) {
-    console.log(`Attribute with ID ${id_VA} not found`);
-    res.status(404).json({ message: 'Attribute not found' });
-    return;
-  }
-
-  const { formatData } = attrRows[0];
-  
-  // Validate the value against the format
-  try {
-    const regex = new RegExp(formatData);
-    if (!regex.test(value)) {
-      console.log(`Value ${value} does not match format ${formatData}`);
-      res.status(400).json({ message: `Value does not match the required format: ${formatData}` });
-      return;
-    }
-  } catch (err) {
-    console.error('Error validating format:', err);
-    // If the regex is invalid, we'll still allow the value
-  }
-
-  const [result] = await pool.query<ResultSetHeader>(
-    'INSERT INTO participant_variable_attribute (id_P, id_VA, value) VALUES (?, ?, ?)',
-    [id, id_VA, value]
-  );
-
-  console.log('Successfully added attribute value');
-  res.status(201).json({ id: result.insertId, id_P: id, id_VA, value });
+  console.log(`Found ${participants.length} participants for type ${typeId}`);
+  res.json(participants);
 }));
 
 export default router; 
