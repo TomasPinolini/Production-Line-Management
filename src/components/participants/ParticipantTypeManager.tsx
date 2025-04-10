@@ -25,7 +25,7 @@ export const ParticipantTypeManager: React.FC = () => {
       const data = await response.json();
       // Transform the data to match our expected format
       const transformedData = data.map((type: any) => ({
-        id_PT: type.id,
+        id_PT: type.id_PT,
         name: type.name,
         attributes: type.attributes || []
       }));
@@ -57,7 +57,7 @@ export const ParticipantTypeManager: React.FC = () => {
       const addedType = await response.json();
       // Transform the response to match our expected format
       const transformedType = {
-        id_PT: addedType.id,
+        id_PT: addedType.id_PT,
         name: addedType.name,
         attributes: []
       };

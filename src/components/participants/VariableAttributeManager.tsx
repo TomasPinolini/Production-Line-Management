@@ -1,46 +1,44 @@
 import React, { useState, useEffect } from 'react';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { VariableAttribute } from '../../types';
-import { toast } from 'react-hot-toast';
 
-interface VariableAttributeManagerProps {
+const API_BASE_URL = 'http://localhost:3000/api';
+
+interface Props {
   participantTypeId: number;
-  onAttributesChange: (attributes: VariableAttribute[]) => void;
+  onAttributesChange?: (attributes: VariableAttribute[]) => void;
 }
 
-const VariableAttributeManager: React.FC<VariableAttributeManagerProps> = ({
-  participantTypeId,
-  onAttributesChange
-}) => {
+const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttributesChange }) => {
   const [attributes, setAttributes] = useState<VariableAttribute[]>([]);
-  const [newAttribute, setNewAttribute] = useState({
-    name: '',
-    formatData: '',
-    description: ''
-  });
+  const [newAttribute, setNewAttribute] = useState({ name: '', formatData: '' });
   const [editingAttribute, setEditingAttribute] = useState<VariableAttribute | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchAttributes();
+    if (participantTypeId) {
+      fetchAttributes();
+    }
   }, [participantTypeId]);
 
   const fetchAttributes = async () => {
     try {
       setLoading(true);
-      setError(null);
-      const response = await fetch(`http://localhost:3000/api/participant-types/${participantTypeId}/attributes`);
+      const response = await fetch(`${API_BASE_URL}/participant-types/${participantTypeId}/attributes`);
       if (!response.ok) throw new Error('Failed to fetch attributes');
       const data = await response.json();
-      // Transform the data to match our expected format
+      // Transform the data to match our interface
       const transformedData = data.map((attr: any) => ({
-        id_VA: attr.id,
-        id_Type: attr.participant_type_id,
+        id_VA: attr.id_VA,
+        id_Type: attr.id_Type,
         name: attr.name,
         formatData: attr.formatData
       }));
-      setAttributes(transformedData || []);
-      onAttributesChange(transformedData || []);
+      console.log('Fetched attributes:', transformedData);
+      setAttributes(transformedData);
+      onAttributesChange?.(transformedData);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load attributes';
       setError(message);
@@ -54,8 +52,7 @@ const VariableAttributeManager: React.FC<VariableAttributeManagerProps> = ({
   const handleAddAttribute = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      console.log('Sending attribute data:', newAttribute);
-      const response = await fetch(`http://localhost:3000/api/participant-types/${participantTypeId}/attributes`, {
+      const response = await fetch(`${API_BASE_URL}/participant-types/${participantTypeId}/attributes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -63,28 +60,19 @@ const VariableAttributeManager: React.FC<VariableAttributeManagerProps> = ({
         body: JSON.stringify(newAttribute),
       });
 
-      // Log the raw response for debugging
-      const responseText = await response.text();
-      console.log('Raw response:', responseText);
-
-      if (!response.ok) {
-        let errorMessage = 'Failed to add attribute';
-        try {
-          // Try to parse the error response as JSON
-          const errorData = JSON.parse(responseText);
-          errorMessage = errorData.details || errorData.error || errorMessage;
-        } catch (parseError) {
-          console.error('Error parsing response:', parseError);
-          errorMessage = `Server error: ${responseText.substring(0, 100)}...`;
-        }
-        throw new Error(errorMessage);
-      }
+      if (!response.ok) throw new Error('Failed to add attribute');
       
-      // Parse the success response
-      const addedAttribute = JSON.parse(responseText);
-      setAttributes([...attributes, addedAttribute]);
-      onAttributesChange([...attributes, addedAttribute]);
-      setNewAttribute({ name: '', formatData: '', description: '' });
+      const addedAttribute = await response.json();
+      // Transform the response to match our interface
+      const transformedAttribute: VariableAttribute = {
+        id_VA: addedAttribute.id_VA,
+        id_Type: addedAttribute.id_Type,
+        name: addedAttribute.name,
+        formatData: addedAttribute.formatData
+      };
+      setAttributes([...attributes, transformedAttribute]);
+      setNewAttribute({ name: '', formatData: '' });
+      onAttributesChange?.([...attributes, transformedAttribute]);
       toast.success('Attribute added successfully');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add attribute';
@@ -96,14 +84,14 @@ const VariableAttributeManager: React.FC<VariableAttributeManagerProps> = ({
 
   const handleDeleteAttribute = async (id: number) => {
     try {
-      const response = await fetch(`http://localhost:3000/api/participant-types/${participantTypeId}/attributes/${id}`, {
+      const response = await fetch(`${API_BASE_URL}/participant-types/${participantTypeId}/attributes/${id}`, {
         method: 'DELETE',
       });
 
       if (!response.ok) throw new Error('Failed to delete attribute');
       
       setAttributes(attributes.filter(attr => attr.id_VA !== id));
-      onAttributesChange(attributes.filter(attr => attr.id_VA !== id));
+      onAttributesChange?.(attributes.filter(attr => attr.id_VA !== id));
       toast.success('Attribute deleted successfully');
     } catch (err) {
       setError('Failed to delete attribute');
@@ -117,7 +105,7 @@ const VariableAttributeManager: React.FC<VariableAttributeManagerProps> = ({
     if (!editingAttribute) return;
 
     try {
-      const response = await fetch(`http://localhost:3000/api/participant-types/${participantTypeId}/attributes/${editingAttribute.id_VA}`, {
+      const response = await fetch(`${API_BASE_URL}/participant-types/${participantTypeId}/attributes/${editingAttribute.id_VA}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -137,7 +125,7 @@ const VariableAttributeManager: React.FC<VariableAttributeManagerProps> = ({
       setAttributes(attributes.map(attr => 
         attr.id_VA === updatedAttribute.id_VA ? updatedAttribute : attr
       ));
-      onAttributesChange(attributes.map(attr => 
+      onAttributesChange?.(attributes.map(attr => 
         attr.id_VA === updatedAttribute.id_VA ? updatedAttribute : attr
       ));
       setEditingAttribute(null);
@@ -193,20 +181,9 @@ const VariableAttributeManager: React.FC<VariableAttributeManagerProps> = ({
               </p>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Description</label>
-              <input
-                type="text"
-                value={newAttribute.description}
-                onChange={(e) => setNewAttribute({ ...newAttribute, description: e.target.value })}
-                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                placeholder="e.g., MAC address of the device"
-              />
-            </div>
-
             <button
               type="submit"
-              className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="mt-4 inline-flex justify-center rounded-md border border-transparent bg-blue-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               Add Attribute
             </button>

@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import participantTypesRouter from './routes/participantTypes.js';
+import participantsRouter from './routes/participants.js';
 
 const app = express();
 const port = process.env.PORT || 3000;
@@ -15,6 +16,7 @@ app.get('/', (req, res) => {
 
 // Routes
 app.use('/api/participant-types', participantTypesRouter);
+app.use('/api/participants', participantsRouter);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {

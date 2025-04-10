@@ -13,6 +13,14 @@
     "server": "npm run build:server && npm run start:server"
   },
   "dependencies": {
+    "@tailwindcss/forms": "^0.5.10",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^5.0.1",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
+    "express-async-handler": "^1.2.0",
+    "lucide-react": "^0.487.0",
+    "mysql2": "^3.14.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-hot-toast": "^2.4.1",
