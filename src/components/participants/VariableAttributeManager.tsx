@@ -31,8 +31,8 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
       const data = await response.json();
       // Transform the data to match our interface
       const transformedData = data.map((attr: any) => ({
-        id_VA: attr.id_VA,
-        id_Type: attr.id_Type,
+        id_VA: attr.id,
+        id_Type: attr.participant_type_id,
         name: attr.name,
         formatData: attr.formatData
       }));

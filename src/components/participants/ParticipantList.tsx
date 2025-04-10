@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ParticipantType, VariableAttribute, Participant } from '../../types';
-import { ArrowLeft, Plus, Pencil, Trash2 } from 'lucide-react';
+import { ArrowLeft, Plus, Pencil, Trash2, X } from 'lucide-react';
 import toast from 'react-hot-toast';
+import ParticipantForm from './ParticipantForm';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
@@ -18,6 +19,7 @@ export const ParticipantList: React.FC = () => {
   const [participants, setParticipants] = useState<ParticipantWithAttributes[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
 
   useEffect(() => {
     if (typeId) {
@@ -93,8 +95,52 @@ export const ParticipantList: React.FC = () => {
   };
 
   const handleAddParticipant = () => {
-    // TODO: Implement add participant functionality
-    toast.error('Add participant functionality not implemented yet');
+    setIsAddModalOpen(true);
+  };
+
+  const handleSubmitParticipant = async (data: { name: string; attributes: Record<number, string> }) => {
+    if (!typeId) return;
+
+    try {
+      // Create the participant
+      const response = await fetch(`${API_BASE_URL}/participants`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: data.name,
+          id_Type: parseInt(typeId),
+        }),
+      });
+
+      if (!response.ok) throw new Error('Failed to create participant');
+      const participant = await response.json();
+
+      // Add attribute values
+      const attributePromises = Object.entries(data.attributes).map(([attrId, value]) => 
+        fetch(`${API_BASE_URL}/participants/${participant.id_Participant}/attributes`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            id_VA: parseInt(attrId),
+            value: value,
+          }),
+        })
+      );
+
+      await Promise.all(attributePromises);
+
+      // Refresh the participants list
+      await fetchParticipants(parseInt(typeId));
+      setIsAddModalOpen(false);
+      toast.success('Participant added successfully');
+    } catch (err) {
+      console.error('Error adding participant:', err);
+      toast.error('Failed to add participant');
+    }
   };
 
   if (loading) {
@@ -136,6 +182,31 @@ export const ParticipantList: React.FC = () => {
           Add Participant
         </button>
       </div>
+
+      {/* Add Participant Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4">
+            <div className="flex justify-between items-center px-6 py-4 border-b">
+              <h2 className="text-xl font-semibold text-gray-900">Add New Participant</h2>
+              <button
+                onClick={() => setIsAddModalOpen(false)}
+                className="text-gray-400 hover:text-gray-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-6 py-4">
+              <ParticipantForm
+                typeId={typeId || ''}
+                attributes={attributes}
+                onSubmit={handleSubmitParticipant}
+                onCancel={() => setIsAddModalOpen(false)}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="mt-8 flex flex-col">
         <div className="-my-2 -mx-4 overflow-x-auto sm:-mx-6 lg:-mx-8">
@@ -206,4 +277,6 @@ export const ParticipantList: React.FC = () => {
       </div>
     </div>
   );
-}; 
+};
+
+export default ParticipantList; 

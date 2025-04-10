@@ -25,9 +25,9 @@ export const ParticipantTypeManager: React.FC = () => {
       const data = await response.json();
       // Transform the data to match our expected format
       const transformedData = data.map((type: any) => ({
-        id_PT: type.id_PT,
+        id_PT: type.id,
         name: type.name,
-        attributes: type.attributes || []
+        attributes: []
       }));
       console.log('Fetched participant types:', transformedData);
       setParticipantTypes(transformedData);
@@ -95,7 +95,13 @@ export const ParticipantTypeManager: React.FC = () => {
 
   const handleAttributesChange = (attributes: VariableAttribute[]) => {
     if (selectedType) {
-      setSelectedType({ ...selectedType, attributes });
+      const updatedType = { ...selectedType, attributes };
+      setSelectedType(updatedType);
+      setParticipantTypes(types => 
+        types.map(type => 
+          type.id_PT === selectedType.id_PT ? updatedType : type
+        )
+      );
     }
   };
 
@@ -105,35 +111,27 @@ export const ParticipantTypeManager: React.FC = () => {
 
   return (
     <div className="space-y-6">
-      <div className="bg-white shadow rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Participant Types</h2>
-        
-        {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-4">
-            {error}
-          </div>
-        )}
-
-        <form onSubmit={handleAddType} className="mb-6">
-          <div className="flex gap-4">
-            <input
-              type="text"
-              value={newType.name}
-              onChange={(e) => setNewType({ name: e.target.value })}
-              placeholder="New participant type name"
-              className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-              required
-            />
-            <button
-              type="submit"
-              className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
-            >
-              Add Type
-            </button>
-          </div>
+      <div>
+        <h2 className="text-lg font-medium text-gray-900">Participant Types</h2>
+        <form onSubmit={handleAddType} className="mt-4 flex gap-2">
+          <input
+            type="text"
+            value={newType.name}
+            onChange={(e) => setNewType({ name: e.target.value })}
+            placeholder="New participant type name"
+            className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            required
+          />
+          <button
+            type="submit"
+            className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            Add Type
+          </button>
         </form>
 
-        <div className="space-y-4">
+        <div className="space-y-4 mt-6">
           {participantTypes.length === 0 ? (
             <p className="text-gray-500 text-center py-4">No participant types found</p>
           ) : (
