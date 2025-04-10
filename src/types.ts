@@ -1,6 +1,7 @@
 export interface ParticipantType {
   id: number;
   name: string;
+  description?: string;
 }
 
 export interface Participant {
