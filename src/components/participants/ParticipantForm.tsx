@@ -2,6 +2,11 @@ import React, { useState, useEffect } from 'react';
 import { toast } from 'react-hot-toast';
 import { VariableAttribute } from '../../types';
 
+interface AttributeValue {
+  id: number;
+  value: string;
+}
+
 interface ParticipantFormProps {
   typeId: string;
   participant?: {
@@ -10,7 +15,7 @@ interface ParticipantFormProps {
     attributeValues: Record<number, string>;
   };
   attributes: VariableAttribute[];
-  onSubmit: (data: { name: string; attributes: Record<number, string> }) => void;
+  onSubmit: (data: { name: string; attributes: AttributeValue[] }) => void;
   onCancel: () => void;
 }
 
@@ -25,6 +30,17 @@ export default function ParticipantForm({
   const [attributeValues, setAttributeValues] = useState<Record<number, string>>(
     participant?.attributeValues || {}
   );
+  const [formatErrors, setFormatErrors] = useState<Record<number, boolean>>({});
+
+  const validateFormat = (value: string, format: string): boolean => {
+    try {
+      const regex = new RegExp(format);
+      return regex.test(value);
+    } catch (err) {
+      console.error('Invalid regex pattern:', err);
+      return true; // If the regex is invalid, we don't block the input
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,24 +50,54 @@ export default function ParticipantForm({
       return;
     }
 
-    // Validate required attributes
-    const missingAttributes = attributes.filter(
-      attr => !attributeValues[attr.id_VA] || !attributeValues[attr.id_VA].trim()
-    );
+    // Validate all attributes
+    const errors: Record<number, boolean> = {};
+    let hasError = false;
 
-    if (missingAttributes.length > 0) {
-      toast.error(`Please fill in all attributes: ${missingAttributes.map(attr => attr.name).join(', ')}`);
+    attributes.forEach(attr => {
+      const value = attributeValues[attr.id];
+      if (!value || !value.trim()) {
+        toast.error(`${attr.name} is required`);
+        hasError = true;
+        return;
+      }
+
+      if (attr.format_data && !validateFormat(value, attr.format_data)) {
+        errors[attr.id] = true;
+        toast.error(`${attr.name} does not match the required format`);
+        hasError = true;
+      }
+    });
+
+    if (hasError) {
+      setFormatErrors(errors);
       return;
     }
 
-    onSubmit({ name, attributes: attributeValues });
+    // Transform attributes from Record to Array format
+    const attributesArray = Object.entries(attributeValues).map(([id, value]) => ({
+      id: parseInt(id),
+      value
+    }));
+
+    onSubmit({ 
+      name, 
+      attributes: attributesArray 
+    });
   };
 
-  const handleAttributeChange = (attributeId: number, value: string) => {
-    setAttributeValues(prev => ({
-      ...prev,
-      [attributeId]: value
-    }));
+  const handleAttributeChange = (attributeId: number, value: string, format: string) => {
+    const updatedValues = { ...attributeValues };
+    updatedValues[attributeId] = value;
+    setAttributeValues(updatedValues);
+
+    // Validate format as user types
+    if (format && value) {
+      setFormatErrors(prev => ({
+        ...prev,
+        [attributeId]: !validateFormat(value, format)
+      }));
+    }
   };
 
   return (
@@ -71,18 +117,35 @@ export default function ParticipantForm({
       </div>
 
       {attributes.map(attribute => (
-        <div key={attribute.id_VA}>
-          <label htmlFor={`attr-${attribute.id_VA}`} className="block text-sm font-medium text-gray-700">
+        <div key={attribute.id} className="space-y-1">
+          <label htmlFor={`attr-${attribute.id}`} className="block text-sm font-medium text-gray-700">
             {attribute.name}
           </label>
+          {attribute.description && (
+            <p className="text-sm text-gray-500">{attribute.description}</p>
+          )}
           <input
-            type={attribute.formatData === 'number' ? 'number' : 'text'}
-            id={`attr-${attribute.id_VA}`}
-            value={attributeValues[attribute.id_VA] || ''}
-            onChange={e => handleAttributeChange(attribute.id_VA, e.target.value)}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            type="text"
+            id={`attr-${attribute.id}`}
+            value={attributeValues[attribute.id] || ''}
+            onChange={e => handleAttributeChange(attribute.id, e.target.value, attribute.format_data || '')}
+            className={`mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
+              formatErrors[attribute.id]
+                ? 'border-red-300 text-red-900 placeholder-red-300 focus:border-red-500 focus:ring-red-500'
+                : 'border-gray-300'
+            }`}
             required
           />
+          {attribute.format_data && (
+            <p className="mt-1 text-xs text-gray-500">
+              Format: {attribute.format_data}
+            </p>
+          )}
+          {formatErrors[attribute.id] && (
+            <p className="mt-1 text-xs text-red-600">
+              Value does not match the required format
+            </p>
+          )}
         </div>
       ))}
 
@@ -103,4 +166,4 @@ export default function ParticipantForm({
       </div>
     </form>
   );
-} 
+}

@@ -7,50 +7,52 @@ const router = Router();
 
 // Get all participant types
 router.get('/', asyncHandler(async (req: Request, res: Response) => {
-  console.log('Attempting to fetch participant types...');
+  console.log('Fetching all participant types...');
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT id_PT as id, name FROM participant_type ORDER BY name ASC'
+    'SELECT * FROM participant_type ORDER BY name ASC'
   );
-  console.log('Successfully fetched participant types:', rows);
+  console.log(`Found ${rows.length} participant types`);
   res.json(rows);
 }));
 
 // Get a single participant type
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
-  console.log(`Attempting to fetch participant type with id: ${req.params.id}`);
-  const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant_type WHERE id_PT = ?',
-    [req.params.id]
-  );
+  const { id } = req.params;
+  console.log(`Fetching participant type with ID: ${id}`);
   
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT * FROM participant_type WHERE id = ?',
+    [id]
+  );
+
   if (!rows[0]) {
-    console.log(`Participant type with id ${req.params.id} not found`);
+    console.log(`Participant type with ID ${id} not found`);
     res.status(404).json({ message: 'Participant type not found' });
     return;
   }
-  
+
   console.log('Successfully fetched participant type:', rows[0]);
   res.json(rows[0]);
 }));
 
 // Create a new participant type
 router.post('/', asyncHandler(async (req: Request, res: Response) => {
-  const { name } = req.body;
-  console.log('Attempting to create participant type with name:', name);
-  
+  const { name, description } = req.body;
+  console.log('Creating new participant type:', { name, description });
+
   if (!name) {
-    console.log('Name is required but not provided');
+    console.log('Missing required field: name');
     res.status(400).json({ message: 'Name is required' });
     return;
   }
 
   const [result] = await pool.query<ResultSetHeader>(
-    'INSERT INTO participant_type (name) VALUES (?)',
-    [name]
+    'INSERT INTO participant_type (name, description) VALUES (?, ?)',
+    [name, description]
   );
 
   const [newType] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant_type WHERE id_PT = ?',
+    'SELECT * FROM participant_type WHERE id = ?',
     [result.insertId]
   );
 
@@ -60,29 +62,30 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
 
 // Update a participant type
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
-  const { name } = req.body;
-  console.log(`Attempting to update participant type with id: ${req.params.id}`);
-  
+  const { id } = req.params;
+  const { name, description } = req.body;
+  console.log(`Updating participant type ${id}:`, { name, description });
+
   if (!name) {
-    console.log('Name is required but not provided');
+    console.log('Missing required field: name');
     res.status(400).json({ message: 'Name is required' });
     return;
   }
 
   const [result] = await pool.query<ResultSetHeader>(
-    'UPDATE participant_type SET name = ? WHERE id_PT = ?',
-    [name, req.params.id]
+    'UPDATE participant_type SET name = ?, description = ? WHERE id = ?',
+    [name, description, id]
   );
 
   if (result.affectedRows === 0) {
-    console.log(`Participant type with id ${req.params.id} not found for update`);
+    console.log(`Participant type with ID ${id} not found`);
     res.status(404).json({ message: 'Participant type not found' });
     return;
   }
 
   const [updatedType] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant_type WHERE id_PT = ?',
-    [req.params.id]
+    'SELECT * FROM participant_type WHERE id = ?',
+    [id]
   );
 
   console.log('Successfully updated participant type:', updatedType[0]);
@@ -91,59 +94,48 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
 
 // Delete a participant type
 router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
-  console.log(`Attempting to delete participant type with id: ${req.params.id}`);
+  const { id } = req.params;
+  console.log(`Deleting participant type with ID: ${id}`);
+
   const [result] = await pool.query<ResultSetHeader>(
-    'DELETE FROM participant_type WHERE id_PT = ?',
-    [req.params.id]
+    'DELETE FROM participant_type WHERE id = ?',
+    [id]
   );
 
   if (result.affectedRows === 0) {
-    console.log(`Participant type with id ${req.params.id} not found for deletion`);
+    console.log(`Participant type with ID ${id} not found`);
     res.status(404).json({ message: 'Participant type not found' });
     return;
   }
 
-  console.log(`Successfully deleted participant type with id: ${req.params.id}`);
+  console.log(`Successfully deleted participant type with ID: ${id}`);
   res.status(204).end();
 }));
 
 // Get attributes for a participant type
 router.get('/:id/attributes', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  console.log('Fetching attributes for participant type:', id);
+  console.log(`Fetching attributes for participant type: ${id}`);
 
-  // First verify the participant type exists
-  const [typeRows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant_type WHERE id_PT = ?',
-    [id]
-  );
-
-  if (!typeRows.length) {
-    console.log(`Participant type ${id} not found`);
-    res.status(404).json({ error: 'Participant type not found' });
-    return;
-  }
-
-  // Get the attributes
   const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT id_VA as id, name, id_Type as participant_type_id, formatData FROM variable_attribute WHERE id_Type = ?',
+    'SELECT * FROM variable_attribute WHERE type_id = ? ORDER BY name ASC',
     [id]
   );
 
-  console.log(`Found ${rows.length} attributes for participant type ${id}`);
+  console.log(`Found ${rows.length} attributes for type ${id}`);
   res.json(rows);
 }));
 
 // Add a new attribute to a participant type
 router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, formatData } = req.body;
+  const { name, format_data, description } = req.body;
   
-  console.log('Adding attribute:', { id, name, formatData });
+  console.log('Adding attribute:', { id, name, format_data, description });
 
   // Verify the participant type exists first
   const [typeRows] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM participant_type WHERE id_PT = ?',
+    'SELECT * FROM participant_type WHERE id = ?',
     [id]
   );
 
@@ -153,16 +145,16 @@ router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) 
     return;
   }
 
-  // Ensure formatData length is within VARCHAR(100) limit
-  const truncatedFormat = formatData?.substring(0, 100) || '';
+  // Ensure format_data length is within VARCHAR(100) limit
+  const truncatedFormat = format_data?.substring(0, 100) || '';
   
   const [result] = await pool.query<ResultSetHeader>(
-    'INSERT INTO variable_attribute (id_Type, name, formatData) VALUES (?, ?, ?)',
-    [parseInt(id), name, truncatedFormat]
+    'INSERT INTO variable_attribute (type_id, name, format_data, description) VALUES (?, ?, ?, ?)',
+    [parseInt(id), name, truncatedFormat, description || null]
   );
   
   const [newAttribute] = await pool.query<RowDataPacket[]>(
-    'SELECT id_VA as id, name, id_Type as participant_type_id, formatData FROM variable_attribute WHERE id_VA = ?',
+    'SELECT id, name, type_id, format_data, description FROM variable_attribute WHERE id = ?',
     [result.insertId]
   );
 
@@ -173,23 +165,23 @@ router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) 
 // Delete an attribute
 router.delete('/:id/attributes/:attributeId', asyncHandler(async (req: Request, res: Response) => {
   const { attributeId } = req.params;
-  await pool.query('DELETE FROM variable_attribute WHERE id_VA = ?', [attributeId]);
+  await pool.query('DELETE FROM variable_attribute WHERE id = ?', [attributeId]);
   res.status(204).send();
 }));
 
 // Update an attribute
 router.put('/:id/attributes/:attributeId', asyncHandler(async (req: Request, res: Response) => {
   const { attributeId } = req.params;
-  const { name, formatData } = req.body;
+  const { name, format_data, description } = req.body;
   
-  console.log('Updating attribute:', { attributeId, name, formatData });
+  console.log('Updating attribute:', { attributeId, name, format_data, description });
 
-  // Ensure formatData length is within VARCHAR(100) limit
-  const truncatedFormat = formatData?.substring(0, 100) || '';
+  // Ensure format_data length is within VARCHAR(100) limit
+  const truncatedFormat = format_data?.substring(0, 100) || '';
 
   const [result] = await pool.query<ResultSetHeader>(
-    'UPDATE variable_attribute SET name = ?, formatData = ? WHERE id_VA = ?',
-    [name, truncatedFormat, attributeId]
+    'UPDATE variable_attribute SET name = ?, format_data = ?, description = ? WHERE id = ?',
+    [name, truncatedFormat, description || null, attributeId]
   );
 
   if (result.affectedRows === 0) {
@@ -199,7 +191,7 @@ router.put('/:id/attributes/:attributeId', asyncHandler(async (req: Request, res
   }
 
   const [updatedAttribute] = await pool.query<RowDataPacket[]>(
-    'SELECT id_VA as id, name, id_Type as participant_type_id, formatData FROM variable_attribute WHERE id_VA = ?',
+    'SELECT id, name, type_id, format_data, description FROM variable_attribute WHERE id = ?',
     [attributeId]
   );
 

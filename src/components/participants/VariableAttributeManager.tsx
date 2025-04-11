@@ -12,7 +12,11 @@ interface Props {
 
 const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttributesChange }) => {
   const [attributes, setAttributes] = useState<VariableAttribute[]>([]);
-  const [newAttribute, setNewAttribute] = useState({ name: '', formatData: '' });
+  const [newAttribute, setNewAttribute] = useState({ 
+    name: '', 
+    description: '',
+    format_data: '' 
+  });
   const [editingAttribute, setEditingAttribute] = useState<VariableAttribute | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -29,16 +33,9 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
       const response = await fetch(`${API_BASE_URL}/participant-types/${participantTypeId}/attributes`);
       if (!response.ok) throw new Error('Failed to fetch attributes');
       const data = await response.json();
-      // Transform the data to match our interface
-      const transformedData = data.map((attr: any) => ({
-        id_VA: attr.id,
-        id_Type: attr.participant_type_id,
-        name: attr.name,
-        formatData: attr.formatData
-      }));
-      console.log('Fetched attributes:', transformedData);
-      setAttributes(transformedData);
-      onAttributesChange?.(transformedData);
+      console.log('Fetched attributes:', data);
+      setAttributes(data);
+      onAttributesChange?.(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load attributes';
       setError(message);
@@ -63,16 +60,9 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
       if (!response.ok) throw new Error('Failed to add attribute');
       
       const addedAttribute = await response.json();
-      // Transform the response to match our interface
-      const transformedAttribute: VariableAttribute = {
-        id_VA: addedAttribute.id_VA,
-        id_Type: addedAttribute.id_Type,
-        name: addedAttribute.name,
-        formatData: addedAttribute.formatData
-      };
-      setAttributes([...attributes, transformedAttribute]);
-      setNewAttribute({ name: '', formatData: '' });
-      onAttributesChange?.([...attributes, transformedAttribute]);
+      setAttributes([...attributes, addedAttribute]);
+      setNewAttribute({ name: '', description: '', format_data: '' });
+      onAttributesChange?.([...attributes, addedAttribute]);
       toast.success('Attribute added successfully');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add attribute';
@@ -90,8 +80,8 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
 
       if (!response.ok) throw new Error('Failed to delete attribute');
       
-      setAttributes(attributes.filter(attr => attr.id_VA !== id));
-      onAttributesChange?.(attributes.filter(attr => attr.id_VA !== id));
+      setAttributes(attributes.filter(attr => attr.id !== id));
+      onAttributesChange?.(attributes.filter(attr => attr.id !== id));
       toast.success('Attribute deleted successfully');
     } catch (err) {
       setError('Failed to delete attribute');
@@ -105,14 +95,15 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
     if (!editingAttribute) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/participant-types/${participantTypeId}/attributes/${editingAttribute.id_VA}`, {
+      const response = await fetch(`${API_BASE_URL}/participant-types/${participantTypeId}/attributes/${editingAttribute.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
           name: editingAttribute.name,
-          formatData: editingAttribute.formatData,
+          description: editingAttribute.description,
+          format_data: editingAttribute.format_data,
         }),
       });
 
@@ -123,10 +114,10 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
 
       const updatedAttribute = await response.json();
       setAttributes(attributes.map(attr => 
-        attr.id_VA === updatedAttribute.id_VA ? updatedAttribute : attr
+        attr.id === updatedAttribute.id ? updatedAttribute : attr
       ));
       onAttributesChange?.(attributes.map(attr => 
-        attr.id_VA === updatedAttribute.id_VA ? updatedAttribute : attr
+        attr.id === updatedAttribute.id ? updatedAttribute : attr
       ));
       setEditingAttribute(null);
       toast.success('Attribute updated successfully');
@@ -165,25 +156,39 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-gray-700">Description</label>
+              <textarea
+                value={newAttribute.description}
+                onChange={(e) => setNewAttribute({ ...newAttribute, description: e.target.value })}
+                className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                rows={2}
+                placeholder="Explain what this attribute is for and how to use it"
+              />
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-gray-700">
-                Format (Regex) - {100 - (newAttribute.formatData?.length || 0)} characters remaining
+                Format (Regex) - {100 - (newAttribute.format_data?.length || 0)} characters remaining
               </label>
               <input
                 type="text"
-                value={newAttribute.formatData}
-                onChange={(e) => setNewAttribute({ ...newAttribute, formatData: e.target.value })}
+                value={newAttribute.format_data}
+                onChange={(e) => setNewAttribute({ ...newAttribute, format_data: e.target.value })}
                 className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-                placeholder="e.g., ^(?:[0-9A-Fa-f]{2}(?:[:-]|$)){6}$ for MAC address"
+                placeholder="e.g., ^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$ for IPv4"
                 maxLength={100}
               />
-              <p className="mt-1 text-sm text-gray-500">
-                Example for MAC address: ^(?:[0-9A-Fa-f]{2}(?:[:-]|$)){6}$
-              </p>
+              <div className="mt-1 space-y-1 text-sm text-gray-500">
+                <p>Examples:</p>
+                <p>• IPv4: {'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'}</p>
+                <p>• MAC address: {'^(?:[0-9A-Fa-f]{2}(?:[:-]|$)){6}$'}</p>
+                <p className="text-xs">Note: For IPv6, use a simpler format like: {'^([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}$'}</p>
+              </div>
             </div>
 
             <button
               type="submit"
-              className="mt-4 inline-flex justify-center rounded-md border border-transparent bg-blue-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+              className="inline-flex justify-center rounded-md border border-transparent bg-blue-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
             >
               Add Attribute
             </button>
@@ -196,8 +201,8 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
             ) : (
               <ul className="mt-2 divide-y divide-gray-200">
                 {attributes.map((attribute) => (
-                  <li key={attribute.id_VA} className="py-3">
-                    {editingAttribute?.id_VA === attribute.id_VA ? (
+                  <li key={attribute.id} className="py-3">
+                    {editingAttribute?.id === attribute.id ? (
                       <form onSubmit={handleUpdateAttribute} className="space-y-3">
                         <div>
                           <label className="block text-sm font-medium text-gray-700">Name</label>
@@ -213,19 +218,37 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
                           />
                         </div>
                         <div>
+                          <label className="block text-sm font-medium text-gray-700">Description</label>
+                          <textarea
+                            value={editingAttribute.description}
+                            onChange={(e) => setEditingAttribute({
+                              ...editingAttribute,
+                              description: e.target.value
+                            })}
+                            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                            rows={2}
+                          />
+                        </div>
+                        <div>
                           <label className="block text-sm font-medium text-gray-700">
-                            Format (Regex) - {100 - (editingAttribute.formatData?.length || 0)} characters remaining
+                            Format (Regex) - {100 - (editingAttribute.format_data?.length || 0)} characters remaining
                           </label>
                           <input
                             type="text"
-                            value={editingAttribute.formatData}
+                            value={editingAttribute.format_data}
                             onChange={(e) => setEditingAttribute({
                               ...editingAttribute,
-                              formatData: e.target.value
+                              format_data: e.target.value
                             })}
                             className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                             maxLength={100}
                           />
+                          <div className="mt-1 space-y-1 text-sm text-gray-500">
+                            <p>Examples:</p>
+                            <p>• IPv4: {'^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'}</p>
+                            <p>• MAC address: {'^(?:[0-9A-Fa-f]{2}(?:[:-]|$)){6}$'}</p>
+                            <p className="text-xs">Note: For IPv6, use a simpler format like: {'^([0-9A-Fa-f]{1,4}:){7}[0-9A-Fa-f]{1,4}$'}</p>
+                          </div>
                         </div>
                         <div className="flex gap-2">
                           <button
@@ -244,23 +267,26 @@ const VariableAttributeManager: React.FC<Props> = ({ participantTypeId, onAttrib
                         </div>
                       </form>
                     ) : (
-                      <div className="flex justify-between items-center">
+                      <div className="flex justify-between items-start">
                         <div>
                           <p className="text-sm font-medium text-gray-900">{attribute.name}</p>
-                          <p className="text-xs text-gray-400">Format: {attribute.formatData}</p>
+                          {attribute.description && (
+                            <p className="text-sm text-gray-600 mt-1">{attribute.description}</p>
+                          )}
+                          <p className="text-xs text-gray-400 mt-1">Format: {attribute.format_data}</p>
                         </div>
                         <div className="flex gap-2">
                           <button
                             onClick={() => setEditingAttribute(attribute)}
                             className="text-blue-600 hover:text-blue-900"
                           >
-                            Edit
+                            <Pencil className="h-4 w-4" />
                           </button>
                           <button
-                            onClick={() => handleDeleteAttribute(attribute.id_VA)}
+                            onClick={() => handleDeleteAttribute(attribute.id)}
                             className="text-red-600 hover:text-red-900"
                           >
-                            Delete
+                            <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       </div>

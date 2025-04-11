@@ -8,7 +8,7 @@ const API_BASE_URL = 'http://localhost:3000/api';
 
 export const ParticipantTypeManager: React.FC = () => {
   const [participantTypes, setParticipantTypes] = useState<ParticipantType[]>([]);
-  const [newType, setNewType] = useState({ name: '' });
+  const [newType, setNewType] = useState({ name: '', description: '' });
   const [selectedType, setSelectedType] = useState<ParticipantType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,14 +23,7 @@ export const ParticipantTypeManager: React.FC = () => {
       const response = await fetch(`${API_BASE_URL}/participant-types`);
       if (!response.ok) throw new Error('Failed to fetch participant types');
       const data = await response.json();
-      // Transform the data to match our expected format
-      const transformedData = data.map((type: any) => ({
-        id_PT: type.id,
-        name: type.name,
-        attributes: []
-      }));
-      console.log('Fetched participant types:', transformedData);
-      setParticipantTypes(transformedData);
+      setParticipantTypes(data);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load participant types';
       setError(message);
@@ -55,14 +48,8 @@ export const ParticipantTypeManager: React.FC = () => {
       if (!response.ok) throw new Error('Failed to add participant type');
       
       const addedType = await response.json();
-      // Transform the response to match our expected format
-      const transformedType = {
-        id_PT: addedType.id_PT,
-        name: addedType.name,
-        attributes: []
-      };
-      setParticipantTypes([...participantTypes, transformedType]);
-      setNewType({ name: '' });
+      setParticipantTypes([...participantTypes, addedType]);
+      setNewType({ name: '', description: '' });
       toast.success('Participant type added successfully');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to add participant type';
@@ -80,8 +67,8 @@ export const ParticipantTypeManager: React.FC = () => {
 
       if (!response.ok) throw new Error('Failed to delete participant type');
       
-      setParticipantTypes(participantTypes.filter(type => type.id_PT !== id));
-      if (selectedType?.id_PT === id) {
+      setParticipantTypes(participantTypes.filter(type => type.id !== id));
+      if (selectedType?.id === id) {
         setSelectedType(null);
       }
       toast.success('Participant type deleted successfully');
@@ -99,7 +86,7 @@ export const ParticipantTypeManager: React.FC = () => {
       setSelectedType(updatedType);
       setParticipantTypes(types => 
         types.map(type => 
-          type.id_PT === selectedType.id_PT ? updatedType : type
+          type.id === selectedType.id ? updatedType : type
         )
       );
     }
@@ -114,14 +101,23 @@ export const ParticipantTypeManager: React.FC = () => {
       <div>
         <h2 className="text-lg font-medium text-gray-900">Participant Types</h2>
         <form onSubmit={handleAddType} className="mt-4 flex gap-2">
-          <input
-            type="text"
-            value={newType.name}
-            onChange={(e) => setNewType({ name: e.target.value })}
-            placeholder="New participant type name"
-            className="flex-1 rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
-            required
-          />
+          <div className="flex-1 space-y-2">
+            <input
+              type="text"
+              value={newType.name}
+              onChange={(e) => setNewType({ ...newType, name: e.target.value })}
+              placeholder="New participant type name"
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+              required
+            />
+            <input
+              type="text"
+              value={newType.description}
+              onChange={(e) => setNewType({ ...newType, description: e.target.value })}
+              placeholder="Description (optional)"
+              className="w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+            />
+          </div>
           <button
             type="submit"
             className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
@@ -137,10 +133,15 @@ export const ParticipantTypeManager: React.FC = () => {
           ) : (
             participantTypes.map((type) => (
               <div
-                key={type.id_PT}
+                key={type.id}
                 className="flex items-center justify-between p-4 bg-gray-50 rounded-lg"
               >
-                <span className="font-medium">{type.name}</span>
+                <div>
+                  <span className="font-medium">{type.name}</span>
+                  {type.description && (
+                    <p className="text-sm text-gray-600 mt-1">{type.description}</p>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <button
                     onClick={() => setSelectedType(type)}
@@ -149,7 +150,7 @@ export const ParticipantTypeManager: React.FC = () => {
                     Manage Attributes
                   </button>
                   <button
-                    onClick={() => handleDeleteType(type.id_PT)}
+                    onClick={() => handleDeleteType(type.id)}
                     className="text-red-600 hover:text-red-800"
                   >
                     Delete
@@ -175,7 +176,7 @@ export const ParticipantTypeManager: React.FC = () => {
             </button>
           </div>
           <VariableAttributeManager
-            participantTypeId={selectedType.id_PT}
+            participantTypeId={selectedType.id}
             onAttributesChange={handleAttributesChange}
           />
         </div>

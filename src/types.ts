@@ -1,29 +1,38 @@
 export interface ParticipantType {
-  id_PT: number;
+  id: number;
   name: string;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
   attributes?: VariableAttribute[];
 }
 
 export interface Participant {
-  id_Participant: number;
+  id: number;
   name: string;
-  id_Type: number;
+  type_id: number;
+  created_at?: string;
+  updated_at?: string;
   attributes?: ParticipantAttribute[];
 }
 
 export interface VariableAttribute {
-  id_VA: number;
-  id_Type: number;
+  id: number;
+  type_id: number;
   name: string;
-  formatData: string;
+  description?: string;
+  format_data?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface ParticipantAttribute {
-  id_U: number;
-  id_Participant: number;
-  id_Attribute: number;
+  id: number;
+  participant_id: number;
+  attribute_id: number;
   value: string;
-  ts?: string;
+  created_at?: string;
+  updated_at?: string;
 }
 
 // Helper type for form handling

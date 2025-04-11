@@ -1,14 +1,21 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "module": "CommonJS",
+    "module": "ESNext",
+    "moduleResolution": "Node",
     "outDir": "dist",
-    "target": "ES2020",
-    "lib": ["ES2020"],
-    "moduleResolution": "node",
+    "target": "ESNext",
+    "isolatedModules": true,
+    "noEmit": false,
     "esModuleInterop": true,
-    "types": ["node", "express"]
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "*": ["node_modules/*"]
+    }
   },
   "include": ["src/server/**/*"],
-  "exclude": ["src/components", "src/App.tsx", "src/main.tsx"]
+  "exclude": ["node_modules", "dist"]
 } 
