@@ -8,109 +8,343 @@ interface AttributeValue {
   value: string;
 }
 
+interface Attribute {
+  name: string;
+  format_data?: string;
+  value?: string;
+  description?: string;
+}
+
+interface AttributeRowDataPacket extends RowDataPacket {
+  name: string;
+  format_data: string | null;
+  value: string | null;
+}
+
+interface InheritedAttribute {
+  name: string;
+  format_data: string | null;
+  value: string | null;
+}
+
 const router = Router();
 
-// Get all participants
-router.get('/', asyncHandler(async (req: Request, res: Response) => {
-  console.log('Fetching all participants...');
-  const [rows] = await pool.query<RowDataPacket[]>(
-    'SELECT p.*, pt.name as type_name FROM participant p ' +
-    'JOIN participant_type pt ON p.type_id = pt.id ' +
-    'ORDER BY p.name ASC'
-  );
-  console.log(`Found ${rows.length} participants`);
-  res.json(rows);
+// Get all root participants (those with null parent)
+router.get('/roots', asyncHandler(async (req: Request, res: Response) => {
+  console.log('Fetching all root participants...');
+  const connection = await pool.getConnection();
+  try {
+    // First get all root participants
+    const [rootParticipants] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM participant WHERE id_parent IS NULL ORDER BY name ASC'
+    );
+
+    // For each root participant, fetch their complete hierarchy
+    const rootsWithHierarchy = await Promise.all(
+      rootParticipants.map(async (root) => {
+        // Get all descendants using recursive CTE
+        const [descendants] = await connection.query<RowDataPacket[]>(
+          `WITH RECURSIVE participant_hierarchy AS (
+            -- Base case: direct children of the current root
+            SELECT 
+              p.*,
+              1 as level,
+              CAST(p.id AS CHAR(200)) as path
+            FROM participant p
+            WHERE p.id_parent = ?
+            
+            UNION ALL
+            
+            -- Recursive case: children of children
+            SELECT 
+              p.*,
+              ph.level + 1,
+              CONCAT(ph.path, ',', p.id)
+            FROM participant p
+            INNER JOIN participant_hierarchy ph ON p.id_parent = ph.id
+          )
+          SELECT * FROM participant_hierarchy
+          ORDER BY path`,
+          [root.id]
+        );
+
+        // Build the hierarchy tree
+        const buildHierarchy = (participants: RowDataPacket[], parentId: number | null = null): any[] => {
+          return participants
+            .filter(p => p.id_parent === parentId)
+            .map(p => ({
+              ...p,
+              children: buildHierarchy(participants, p.id)
+            }));
+        };
+
+        // Return root with its hierarchy
+        return {
+          ...root,
+          children: buildHierarchy(descendants, root.id)
+        };
+      })
+    );
+
+    console.log(`Found ${rootsWithHierarchy.length} root participants with their complete hierarchies`);
+    res.json(rootsWithHierarchy);
+  } finally {
+    connection.release();
+  }
 }));
 
-// Get a single participant with their attributes
+// Get a participant with its children and attributes
 router.get('/:id', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   console.log(`Fetching participant with ID: ${id}`);
 
-  // Get participant basic info
-  const [participants] = await pool.query<RowDataPacket[]>(
-    'SELECT p.*, pt.name as type_name FROM participant p ' +
-    'JOIN participant_type pt ON p.type_id = pt.id ' +
-    'WHERE p.id = ?',
+  const connection = await pool.getConnection();
+  try {
+    // Get participant basic info
+    const [participants] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM participant WHERE id = ?',
+      [id]
+    );
+
+    if (!participants[0]) {
+      console.log(`Participant with ID ${id} not found`);
+      res.status(404).json({ message: 'Participant not found' });
+      return;
+    }
+
+    const participant = participants[0];
+
+    // Get participant's attributes
+    const [attributes] = await connection.query<RowDataPacket[]>(
+      'SELECT va.*, av.value FROM variable_attribute va ' +
+      'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
+      'WHERE va.participant_id = ?',
+      [id, id]
+    );
+
+    // Get participant's children
+    const [children] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM participant WHERE id_parent = ?',
+      [id]
+    );
+
+    // Get inherited attributes from parent chain
+    const [inheritedAttributes] = await connection.query<RowDataPacket[]>(
+      `WITH RECURSIVE parent_chain AS (
+        SELECT id, id_parent FROM participant WHERE id = ?
+        UNION ALL
+        SELECT p.id, p.id_parent FROM participant p
+        INNER JOIN parent_chain pc ON p.id = pc.id_parent
+      )
+      SELECT DISTINCT va.*, av.value 
+      FROM parent_chain pc
+      JOIN variable_attribute va ON va.participant_id = pc.id
+      LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ?
+      WHERE pc.id != ?`,
+      [id, id, id]
+    );
+
+    participant.attributes = [...attributes, ...inheritedAttributes];
+    participant.children = children;
+
+    console.log('Successfully fetched participant with attributes and children');
+    res.json(participant);
+  } finally {
+    connection.release();
+  }
+}));
+
+// Get children of a participant
+router.get('/:id/children', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  console.log(`Fetching children of participant: ${id}`);
+
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `SELECT p.*, 
+            (SELECT COUNT(*) FROM participant WHERE id_parent = p.id) > 0 as has_children
+     FROM participant p 
+     WHERE p.id_parent = ? 
+     ORDER BY p.name ASC`,
     [id]
   );
 
-  if (!participants[0]) {
-    console.log(`Participant with ID ${id} not found`);
-    res.status(404).json({ message: 'Participant not found' });
-    return;
-  }
+  console.log(`Found ${rows.length} children`);
+  res.json(rows);
+}));
 
-  const participant = participants[0];
+// Get inherited attributes for a participant
+router.get('/:id/inherited-attributes', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  console.log(`Fetching inherited attributes for participant: ${id}`);
 
-  // Get participant attributes
-  const [attributes] = await pool.query<RowDataPacket[]>(
-    'SELECT va.*, av.value FROM variable_attribute va ' +
-    'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
-    'WHERE va.type_id = ?',
-    [id, participant.type_id]
+  const [rows] = await pool.query<RowDataPacket[]>(
+    `WITH RECURSIVE parent_chain AS (
+      SELECT id, id_parent FROM participant WHERE id = ?
+      UNION ALL
+      SELECT p.id, p.id_parent FROM participant p
+      INNER JOIN parent_chain pc ON p.id = pc.id_parent
+    )
+    SELECT DISTINCT va.*, av.value 
+    FROM parent_chain pc
+    JOIN variable_attribute va ON va.participant_id = pc.id
+    LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ?
+    WHERE pc.id != ?`,
+    [id, id, id]
   );
 
-  participant.attributes = attributes;
-  console.log('Successfully fetched participant with attributes');
-  res.json(participant);
+  console.log(`Found ${rows.length} inherited attributes`);
+  res.json(rows);
+}));
+
+// Get participant's own attributes
+router.get('/:id/attributes', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  console.log(`Fetching own attributes for participant: ${id}`);
+
+  const [rows] = await pool.query<RowDataPacket[]>(
+    'SELECT va.*, av.value FROM variable_attribute va ' +
+    'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
+    'WHERE va.participant_id = ?',
+    [id, id]
+  );
+
+  console.log(`Found ${rows.length} own attributes`);
+  res.json(rows);
 }));
 
 // Create a new participant
 router.post('/', asyncHandler(async (req: Request, res: Response) => {
-  const { name, type_id, attributes } = req.body;
-  console.log('Creating new participant:', { name, type_id });
+  const { name, id_parent, attributes } = req.body;
+  console.log('Creating new participant:', { name, id_parent });
 
-  if (!name || !type_id) {
+  if (!name) {
     console.log('Missing required fields');
-    res.status(400).json({ message: 'Name and type_id are required' });
+    res.status(400).json({ message: 'Name is required' });
     return;
   }
 
-  // Start transaction
   const connection = await pool.getConnection();
   await connection.beginTransaction();
 
   try {
+    // Validate parent if provided
+    if (id_parent) {
+      const [parentRows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM participant WHERE id = ?',
+        [id_parent]
+      );
+      if (!parentRows[0]) {
+        throw new Error('Parent participant not found');
+      }
+    }
+
     // Insert participant
     const [result] = await connection.query<ResultSetHeader>(
-      'INSERT INTO participant (name, type_id) VALUES (?, ?)',
-      [name, type_id]
+      'INSERT INTO participant (name, id_parent) VALUES (?, ?)',
+      [name, id_parent || null]
     );
     const participantId = result.insertId;
 
-    // Insert attribute values if provided
+    // Handle attributes if provided
     if (attributes && attributes.length > 0) {
-      const attributeValues = attributes.map((attr: AttributeValue) => [
-        participantId,
-        attr.id,
-        attr.value
-      ]);
+      // First get inherited attributes if there's a parent
+      let inheritedAttributes: RowDataPacket[] = [];
+      if (id_parent) {
+        const [inherited] = await connection.query<RowDataPacket[]>(
+          `WITH RECURSIVE parent_chain AS (
+            SELECT id, id_parent FROM participant WHERE id = ?
+            UNION ALL
+            SELECT p.id, p.id_parent FROM participant p
+            INNER JOIN parent_chain pc ON p.id = pc.id_parent
+          )
+          SELECT DISTINCT va.name, va.format_data, av.value 
+          FROM parent_chain pc
+          JOIN variable_attribute va ON va.participant_id = pc.id
+          LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ?
+          WHERE pc.id != ?`,
+          [id_parent, participantId, participantId]
+        );
+        inheritedAttributes = inherited;
+      }
 
-      await connection.query(
-        'INSERT INTO attribute_value (participant_id, attribute_id, value) VALUES ?',
-        [attributeValues]
-      );
+      // Filter attributes to only store those that differ from inherited
+      const attributesToStore = attributes.filter((attr: Attribute) => {
+        const inherited = (inheritedAttributes as AttributeRowDataPacket[])
+          .find(ia => ia.name === attr.name);
+        return !inherited || 
+               inherited.value !== attr.value ||
+               inherited.format_data !== attr.format_data;
+      });
+      
+      // Create new attributes
+      const attributePromises = attributesToStore.map(async (attr: Attribute) => {
+        const [vaResult] = await connection.query<ResultSetHeader>(
+          'INSERT INTO variable_attribute (participant_id, name, format_data) VALUES (?, ?, ?)',
+          [participantId, attr.name, attr.format_data || null]
+        );
+        return {
+          attributeId: vaResult.insertId,
+          value: attr.value || ''
+        };
+      });
+
+      // For all attributes (new and inherited), create attribute values
+      const allAttributeValues = [...await Promise.all(attributePromises)];
+
+      // Insert all attribute values
+      const attributeValues = allAttributeValues
+        .filter(({ value }) => value !== undefined)
+        .map(({ attributeId, value }) => [
+          participantId,
+          attributeId,
+          value || ''
+        ]);
+
+      if (attributeValues.length > 0) {
+        await connection.query(
+          'INSERT INTO attribute_value (participant_id, attribute_id, value) VALUES ?',
+          [attributeValues]
+        );
+      }
     }
 
     await connection.commit();
     
-    // Fetch the created participant with attributes
+    // Fetch the created participant with its complete structure
     const [newParticipant] = await connection.query<RowDataPacket[]>(
-      'SELECT p.*, pt.name as type_name FROM participant p ' +
-      'JOIN participant_type pt ON p.type_id = pt.id ' +
-      'WHERE p.id = ?',
+      'SELECT * FROM participant WHERE id = ?',
       [participantId]
     );
 
-    const [newAttributes] = await connection.query<RowDataPacket[]>(
+    // Get participant's own attributes
+    const [ownAttributes] = await connection.query<RowDataPacket[]>(
       'SELECT va.*, av.value FROM variable_attribute va ' +
       'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
-      'WHERE va.type_id = ?',
-      [participantId, type_id]
+      'WHERE va.participant_id = ?',
+      [participantId, participantId]
     );
 
-    newParticipant[0].attributes = newAttributes;
+    // Get inherited attributes if parent exists
+    let inheritedAttributes: RowDataPacket[] = [];
+    if (id_parent) {
+      const [inherited] = await connection.query<RowDataPacket[]>(
+        `WITH RECURSIVE parent_chain AS (
+          SELECT id, id_parent FROM participant WHERE id = ?
+          UNION ALL
+          SELECT p.id, p.id_parent FROM participant p
+          INNER JOIN parent_chain pc ON p.id = pc.id_parent
+        )
+        SELECT DISTINCT va.*, av.value 
+        FROM parent_chain pc
+        JOIN variable_attribute va ON va.participant_id = pc.id
+        LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ?
+        WHERE pc.id != ?`,
+        [id_parent, participantId, participantId]
+      );
+      inheritedAttributes = inherited;
+    }
+
+    newParticipant[0].attributes = [...ownAttributes, ...inheritedAttributes];
     console.log('Successfully created participant:', newParticipant[0]);
     res.status(201).json(newParticipant[0]);
   } catch (error) {
@@ -124,24 +358,49 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
 // Update a participant
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, type_id, attributes } = req.body;
-  console.log(`Updating participant ${id}:`, { name, type_id });
+  const { name, id_parent, attributes } = req.body;
+  console.log(`Updating participant ${id}:`, { name, id_parent });
 
-  if (!name || !type_id) {
+  if (!name) {
     console.log('Missing required fields');
-    res.status(400).json({ message: 'Name and type_id are required' });
+    res.status(400).json({ message: 'Name is required' });
     return;
   }
 
-  // Start transaction
   const connection = await pool.getConnection();
   await connection.beginTransaction();
 
   try {
+    // Validate parent if provided
+    if (id_parent) {
+      const [parentRows] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM participant WHERE id = ?',
+        [id_parent]
+      );
+      if (!parentRows[0]) {
+        throw new Error('Parent participant not found');
+      }
+
+      // Check for circular reference
+      const [circularCheck] = await connection.query<RowDataPacket[]>(
+        `WITH RECURSIVE parent_chain AS (
+          SELECT id, id_parent FROM participant WHERE id = ?
+          UNION ALL
+          SELECT p.id, p.id_parent FROM participant p
+          INNER JOIN parent_chain pc ON p.id = pc.id_parent
+        )
+        SELECT id FROM parent_chain WHERE id = ?`,
+        [id_parent, id]
+      );
+      if (circularCheck.length > 0) {
+        throw new Error('Circular reference detected in parent-child relationship');
+      }
+    }
+
     // Update participant
     const [result] = await connection.query<ResultSetHeader>(
-      'UPDATE participant SET name = ?, type_id = ? WHERE id = ?',
-      [name, type_id, id]
+      'UPDATE participant SET name = ?, id_parent = ? WHERE id = ?',
+      [name, id_parent || null, id]
     );
 
     if (result.affectedRows === 0) {
@@ -153,43 +412,123 @@ router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
 
     // Update attribute values
     if (attributes && attributes.length > 0) {
-      // Delete existing attribute values
+      // First get all inherited attributes to know which ones are actually overridden
+      const [inheritedAttributes] = await connection.query<RowDataPacket[]>(
+        `WITH RECURSIVE parent_chain AS (
+          SELECT id, id_parent FROM participant WHERE id = ?
+          UNION ALL
+          SELECT p.id, p.id_parent FROM participant p
+          INNER JOIN parent_chain pc ON p.id = pc.id_parent
+        )
+        SELECT DISTINCT va.name, va.format_data, av.value 
+        FROM parent_chain pc
+        JOIN variable_attribute va ON va.participant_id = pc.id
+        LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ?
+        WHERE pc.id != ?`,
+        [id_parent, id, id]
+      );
+
+      // Get current participant's own attributes
+      const [currentAttributes] = await connection.query<RowDataPacket[]>(
+        'SELECT va.*, av.value FROM variable_attribute va ' +
+        'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
+        'WHERE va.participant_id = ?',
+        [id, id]
+      );
+
+      // Delete existing attribute values for this participant
       await connection.query(
         'DELETE FROM attribute_value WHERE participant_id = ?',
         [id]
       );
 
-      // Insert new attribute values
-      const attributeValues = attributes.map((attr: AttributeValue) => [
-        id,
-        attr.id,
-        attr.value
-      ]);
-
+      // Delete existing variable attributes for this participant
       await connection.query(
-        'INSERT INTO attribute_value (participant_id, attribute_id, value) VALUES ?',
-        [attributeValues]
+        'DELETE FROM variable_attribute WHERE participant_id = ?',
+        [id]
       );
+
+      // Filter attributes to only include ones that differ from inherited
+      const attributesToStore = attributes.filter((attr: Attribute) => {
+        const inherited = (inheritedAttributes as AttributeRowDataPacket[])
+          .find(ia => ia.name === attr.name);
+        // Store if:
+        // 1. No inherited value exists, or
+        // 2. The value is different from inherited, or
+        // 3. The format is different from inherited
+        return !inherited || 
+               inherited.value !== attr.value ||
+               inherited.format_data !== attr.format_data;
+      });
+
+      // Insert new variable attributes and their values
+      const attributePromises = attributesToStore.map(async (attr: Attribute) => {
+        const [vaResult] = await connection.query<ResultSetHeader>(
+          'INSERT INTO variable_attribute (participant_id, name, format_data) VALUES (?, ?, ?)',
+          [id, attr.name, attr.format_data || null]
+        );
+        return {
+          attributeId: vaResult.insertId,
+          value: attr.value || '' // Ensure value is never null
+        };
+      });
+
+      const attributeResults = await Promise.all(attributePromises);
+
+      // Insert new attribute values
+      const attributeValues = attributeResults
+        .filter(({ value }) => value !== undefined) // Only include attributes with values
+        .map(({ attributeId, value }) => [
+          id,
+          attributeId,
+          value || '' // Ensure value is never null
+        ]);
+
+      if (attributeValues.length > 0) {
+        await connection.query(
+          'INSERT INTO attribute_value (participant_id, attribute_id, value) VALUES ?',
+          [attributeValues]
+        );
+      }
     }
 
     await connection.commit();
 
-    // Fetch the updated participant with attributes
+    // Fetch the updated participant with complete structure
     const [updatedParticipant] = await connection.query<RowDataPacket[]>(
-      'SELECT p.*, pt.name as type_name FROM participant p ' +
-      'JOIN participant_type pt ON p.type_id = pt.id ' +
-      'WHERE p.id = ?',
+      'SELECT * FROM participant WHERE id = ?',
       [id]
     );
 
-    const [updatedAttributes] = await connection.query<RowDataPacket[]>(
+    // Get participant's own attributes
+    const [ownAttributes] = await connection.query<RowDataPacket[]>(
       'SELECT va.*, av.value FROM variable_attribute va ' +
       'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
-      'WHERE va.type_id = ?',
-      [id, type_id]
+      'WHERE va.participant_id = ?',
+      [id, id]
     );
 
-    updatedParticipant[0].attributes = updatedAttributes;
+    // Get inherited attributes if parent exists
+    let inheritedAttributes: RowDataPacket[] = [];
+    if (id_parent) {
+      const [inherited] = await connection.query<RowDataPacket[]>(
+        `WITH RECURSIVE parent_chain AS (
+          SELECT id, id_parent FROM participant WHERE id = ?
+          UNION ALL
+          SELECT p.id, p.id_parent FROM participant p
+          INNER JOIN parent_chain pc ON p.id = pc.id_parent
+        )
+        SELECT DISTINCT va.*, av.value 
+        FROM parent_chain pc
+        JOIN variable_attribute va ON va.participant_id = pc.id
+        LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ?
+        WHERE pc.id != ?`,
+        [id_parent, id, id]
+      );
+      inheritedAttributes = inherited;
+    }
+
+    updatedParticipant[0].attributes = [...ownAttributes, ...inheritedAttributes];
     console.log('Successfully updated participant:', updatedParticipant[0]);
     res.json(updatedParticipant[0]);
   } catch (error) {
@@ -205,69 +544,132 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
   console.log(`Deleting participant with ID: ${id}`);
 
-  const [result] = await pool.query<ResultSetHeader>(
-    'DELETE FROM participant WHERE id = ?',
-    [id]
-  );
+  const connection = await pool.getConnection();
+  await connection.beginTransaction();
 
-  if (result.affectedRows === 0) {
-    console.log(`Participant with ID ${id} not found`);
-    res.status(404).json({ message: 'Participant not found' });
-    return;
-  }
-
-  console.log(`Successfully deleted participant with ID: ${id}`);
-  res.status(204).end();
-}));
-
-// Get participants by type
-router.get('/type/:typeId', asyncHandler(async (req: Request, res: Response) => {
-  const { typeId } = req.params;
-  console.log(`Fetching participants for type: ${typeId}`);
-
-  // First get all participants of this type
-  const [participants] = await pool.query<RowDataPacket[]>(
-    'SELECT p.*, pt.name as type_name FROM participant p ' +
-    'JOIN participant_type pt ON p.type_id = pt.id ' +
-    'WHERE p.type_id = ? ' +
-    'ORDER BY p.name ASC',
-    [typeId]
-  );
-
-  // Then get all attributes for these participants
-  const participantIds = participants.map(p => p.id);
-  if (participantIds.length > 0) {
-    const [attributes] = await pool.query<RowDataPacket[]>(
-      'SELECT va.*, av.value, av.participant_id FROM variable_attribute va ' +
-      'LEFT JOIN attribute_value av ON av.attribute_id = va.id ' +
-      'WHERE va.type_id = ? AND (av.participant_id IN (?) OR av.participant_id IS NULL)',
-      [typeId, participantIds]
+  try {
+    // Check if participant has children
+    const [children] = await connection.query<RowDataPacket[]>(
+      'SELECT id FROM participant WHERE id_parent = ?',
+      [id]
     );
 
-    // Group attributes by participant
-    const attributesByParticipant: { [key: number]: any[] } = {};
-    attributes.forEach(attr => {
-      if (attr.participant_id) {
-        if (!attributesByParticipant[attr.participant_id]) {
-          attributesByParticipant[attr.participant_id] = [];
-        }
-        attributesByParticipant[attr.participant_id].push({
-          id: attr.id,
-          name: attr.name,
-          value: attr.value,
-          format_data: attr.format_data
-        });
-      }
-    });
+    if (children.length > 0) {
+      throw new Error('Cannot delete participant with children. Please delete or reassign children first.');
+    }
 
-    // Add attributes to each participant
-    participants.forEach(participant => {
-      participant.attributes = attributesByParticipant[participant.id] || [];
-    });
+    // Delete attribute values
+    await connection.query(
+      'DELETE FROM attribute_value WHERE participant_id = ?',
+      [id]
+    );
+
+    // Delete variable attributes
+    await connection.query(
+      'DELETE FROM variable_attribute WHERE participant_id = ?',
+      [id]
+    );
+
+    // Delete participant
+    const [result] = await connection.query<ResultSetHeader>(
+      'DELETE FROM participant WHERE id = ?',
+      [id]
+    );
+
+    if (result.affectedRows === 0) {
+      await connection.rollback();
+      console.log(`Participant with ID ${id} not found`);
+      res.status(404).json({ message: 'Participant not found' });
+      return;
+    }
+
+    await connection.commit();
+    console.log(`Successfully deleted participant with ID: ${id}`);
+    res.status(204).end();
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
   }
+}));
 
-  console.log(`Found ${participants.length} participants for type ${typeId}`);
-  res.json(participants);
+// Add a new attribute to a participant
+router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { name, description, format_data, value } = req.body;
+  console.log(`Adding new attribute to participant ${id}:`, req.body);
+
+  const connection = await pool.getConnection();
+  await connection.beginTransaction();
+
+  try {
+    // Check if participant exists
+    const [participant] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM participant WHERE id = ?',
+      [id]
+    );
+
+    if (!participant[0]) {
+      throw new Error('Participant not found');
+    }
+
+    // Check if attribute already exists
+    const [existingAttr] = await connection.query<RowDataPacket[]>(
+      'SELECT va.* FROM variable_attribute va WHERE va.participant_id = ? AND va.name = ?',
+      [id, name]
+    );
+
+    let attributeId;
+    if (existingAttr[0]) {
+      // Update existing attribute
+      await connection.query(
+        'UPDATE variable_attribute SET description = ?, format_data = ? WHERE id = ?',
+        [description || null, format_data || null, existingAttr[0].id]
+      );
+      attributeId = existingAttr[0].id;
+    } else {
+      // Create new attribute
+      const [result] = await connection.query<ResultSetHeader>(
+        'INSERT INTO variable_attribute (participant_id, name, description, format_data) VALUES (?, ?, ?, ?)',
+        [id, name, description || null, format_data || null]
+      );
+      attributeId = result.insertId;
+    }
+
+    // Handle attribute value if provided
+    if (value !== undefined) {
+      // Delete any existing value
+      await connection.query(
+        'DELETE FROM attribute_value WHERE participant_id = ? AND attribute_id = ?',
+        [id, attributeId]
+      );
+
+      // Insert new value
+      await connection.query(
+        'INSERT INTO attribute_value (participant_id, attribute_id, value) VALUES (?, ?, ?)',
+        [id, attributeId, value || '']
+      );
+    }
+
+    // Get the complete attribute with its value
+    const [attributes] = await connection.query<RowDataPacket[]>(
+      'SELECT va.*, av.value FROM variable_attribute va ' +
+      'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.participant_id = ? ' +
+      'WHERE va.id = ?',
+      [id, attributeId]
+    );
+
+    await connection.commit();
+    console.log('Successfully created/updated attribute:', attributes[0]);
+    res.status(201).json(attributes[0]);
+  } catch (error) {
+    await connection.rollback();
+    console.error('Error creating/updating attribute:', error);
+    throw error;
+  } finally {
+    connection.release();
+  }
 }));
 
 export default router; 

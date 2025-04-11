@@ -1,41 +1,45 @@
--- Participant Types table
-CREATE TABLE IF NOT EXISTS participant_type (
+-- Assets table with self-referencing hierarchy
+CREATE TABLE IF NOT EXISTS asset (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(50) NOT NULL,
-  description TEXT,
+  name VARCHAR(100) NOT NULL,
+  id_parent INT,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (id_parent) REFERENCES asset(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Variable Attributes table
+-- Variable Attributes table (now linked directly to assets)
 CREATE TABLE IF NOT EXISTS variable_attribute (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  type_id INT NOT NULL,
+  asset_id INT NOT NULL,
   name VARCHAR(50) NOT NULL,
   description VARCHAR(255),
   format_data VARCHAR(100),
-  FOREIGN KEY (type_id) REFERENCES participant_type(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Participants table
-CREATE TABLE IF NOT EXISTS participant (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
-  type_id INT NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (type_id) REFERENCES participant_type(id) ON DELETE CASCADE
+  FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Attribute Values table
+-- Attribute Values table (stores the actual values)
 CREATE TABLE IF NOT EXISTS attribute_value (
   id INT AUTO_INCREMENT PRIMARY KEY,
-  participant_id INT NOT NULL,
+  asset_id INT NOT NULL,
   attribute_id INT NOT NULL,
   value VARCHAR(255) NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (participant_id) REFERENCES participant(id) ON DELETE CASCADE,
+  FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE,
+  FOREIGN KEY (attribute_id) REFERENCES variable_attribute(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- History table (tracks attribute value changes)
+CREATE TABLE IF NOT EXISTS history (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  asset_id INT NOT NULL,
+  attribute_id INT NOT NULL,
+  value VARCHAR(100) NOT NULL,
+  ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE,
   FOREIGN KEY (attribute_id) REFERENCES variable_attribute(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
@@ -44,8 +48,8 @@ CREATE TABLE IF NOT EXISTS production_order (
   id INT AUTO_INCREMENT PRIMARY KEY,
   material_number VARCHAR(20),
   serial_number VARCHAR(5),
-  start_time TIMESTAMP NULL,
-  end_time TIMESTAMP NULL,
+  ts_from TIMESTAMP NULL,
+  ts_to TIMESTAMP NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -54,7 +58,7 @@ CREATE TABLE IF NOT EXISTS production_order (
 CREATE TABLE IF NOT EXISTS process (
   id INT AUTO_INCREMENT PRIMARY KEY,
   order_id INT NOT NULL,
-  start_time TIMESTAMP NULL,
+  ts_from TIMESTAMP NULL,
   result CHAR(1),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -65,8 +69,8 @@ CREATE TABLE IF NOT EXISTS process (
 CREATE TABLE IF NOT EXISTS process_step (
   id INT AUTO_INCREMENT PRIMARY KEY,
   process_id INT NOT NULL,
-  start_time TIMESTAMP NULL,
-  end_time TIMESTAMP NULL,
+  ts_from TIMESTAMP NULL,
+  ts_to TIMESTAMP NULL,
   result CHAR(1),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -83,27 +87,16 @@ CREATE TABLE IF NOT EXISTS step (
   FOREIGN KEY (process_step_id) REFERENCES process_step(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
--- Step Participants (junction table)
-CREATE TABLE IF NOT EXISTS step_participant (
+-- Step Assets (junction table)
+CREATE TABLE IF NOT EXISTS step_asset (
   id INT AUTO_INCREMENT PRIMARY KEY,
   step_id INT NOT NULL,
-  participant_id INT NOT NULL,
+  asset_id INT NOT NULL,
   result CHAR(1),
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (step_id) REFERENCES step(id) ON DELETE CASCADE,
-  FOREIGN KEY (participant_id) REFERENCES participant(id) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- Attribute Updates table
-CREATE TABLE IF NOT EXISTS attribute_update (
-  id INT AUTO_INCREMENT PRIMARY KEY,
-  participant_id INT NOT NULL,
-  attribute_id INT NOT NULL,
-  value VARCHAR(100) NOT NULL,
-  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FOREIGN KEY (participant_id) REFERENCES participant(id) ON DELETE CASCADE,
-  FOREIGN KEY (attribute_id) REFERENCES variable_attribute(id) ON DELETE CASCADE
+  FOREIGN KEY (asset_id) REFERENCES asset(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 -- Result Details table
@@ -114,5 +107,5 @@ CREATE TABLE IF NOT EXISTS result_detail (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (step_id) REFERENCES step(id) ON DELETE CASCADE,
-  FOREIGN KEY (update_id) REFERENCES attribute_update(id) ON DELETE CASCADE
+  FOREIGN KEY (update_id) REFERENCES history(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci; 

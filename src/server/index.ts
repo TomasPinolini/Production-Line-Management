@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import participantTypesRouter from './routes/participantTypes';
-import participantsRouter from './routes/participants';
+import assetsRouter from './routes/assets';
 
 const app = express();
 const port = 3000;
@@ -16,8 +15,7 @@ app.get('/', (req, res) => {
 });
 
 // Routes
-app.use('/api/participant-types', participantTypesRouter);
-app.use('/api/participants', participantsRouter);
+app.use('/api/assets', assetsRouter);
 
 // Error handling middleware
 app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -26,5 +24,5 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
 });
 
 app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+  console.log(`Server running at http://localhost:${port}`);
 }); 
