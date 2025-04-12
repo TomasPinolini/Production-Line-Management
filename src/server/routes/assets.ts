@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import pool from '../db';
 import { RowDataPacket, ResultSetHeader } from 'mysql2';
 import asyncHandler from 'express-async-handler';
+import type { Participant, VariableAttribute } from '../../types';
 
 const router = Router();
 
@@ -145,19 +146,76 @@ router.post('/', asyncHandler(async (req: Request, res: Response) => {
 // Update an asset
 router.put('/:id', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, id_parent } = req.body;
+  const { name, id_parent, attributes } = req.body;
   
-  await pool.query(
-    'UPDATE asset SET name = ?, id_parent = ? WHERE id = ?',
-    [name, id_parent, id]
-  );
+  const connection = await pool.getConnection();
+  await connection.beginTransaction();
   
-  const [updatedAsset] = await pool.query<RowDataPacket[]>(
-    'SELECT * FROM asset WHERE id = ?',
-    [id]
-  );
-  
-  res.json(updatedAsset[0]);
+  try {
+    // Update asset basic info
+    await connection.query(
+      'UPDATE asset SET name = ?, id_parent = ? WHERE id = ?',
+      [name, id_parent, id]
+    );
+    
+    // Update attributes if provided
+    if (attributes && attributes.length > 0) {
+      for (const attr of attributes) {
+        if (attr.value) {
+          // Check if value exists
+          const [existingValue] = await connection.query<RowDataPacket[]>(
+            'SELECT * FROM attribute_value WHERE asset_id = ? AND attribute_id = ?',
+            [id, attr.id]
+          );
+          
+          if (existingValue[0]) {
+            // Update existing value
+            await connection.query(
+              'UPDATE attribute_value SET value = ? WHERE asset_id = ? AND attribute_id = ?',
+              [attr.value, id, attr.id]
+            );
+          } else {
+            // Insert new value
+            await connection.query(
+              'INSERT INTO attribute_value (asset_id, attribute_id, value) VALUES (?, ?, ?)',
+              [id, attr.id, attr.value]
+            );
+          }
+          
+          // Record in history
+          await connection.query(
+            'INSERT INTO history (asset_id, attribute_id, value) VALUES (?, ?, ?)',
+            [id, attr.id, attr.value]
+          );
+        }
+      }
+    }
+    
+    await connection.commit();
+    
+    // Get updated asset with attributes
+    const [updatedAsset] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM asset WHERE id = ?',
+      [id]
+    );
+    
+    // Get asset's attributes
+    const [assetAttributes] = await connection.query<RowDataPacket[]>(
+      'SELECT va.*, av.value FROM variable_attribute va ' +
+      'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.asset_id = ? ' +
+      'WHERE va.asset_id = ?',
+      [id, id]
+    );
+    
+    updatedAsset[0].attributes = assetAttributes;
+    
+    res.json(updatedAsset[0]);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
 }));
 
 // Delete an asset
@@ -195,6 +253,20 @@ router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) 
   await connection.beginTransaction();
   
   try {
+    // Validate the value against the format pattern if both are provided
+    if (format_data && value !== undefined) {
+      try {
+        const regex = new RegExp(format_data);
+        if (!regex.test(value)) {
+          res.status(400).json({ message: 'Value does not match the provided format pattern' });
+          return;
+        }
+      } catch (err) {
+        console.error('Invalid regex pattern:', err);
+        // If the regex is invalid, we'll still allow the creation
+      }
+    }
+
     // Insert the attribute definition
     const [result] = await connection.query<ResultSetHeader>(
       'INSERT INTO variable_attribute (asset_id, name, description, format_data) VALUES (?, ?, ?, ?)',
@@ -237,6 +309,32 @@ router.put('/:id/attributes/:attributeId', asyncHandler(async (req: Request, res
   await connection.beginTransaction();
   
   try {
+    // Get the attribute format pattern
+    const [attributes] = await connection.query<RowDataPacket[]>(
+      'SELECT format_data FROM variable_attribute WHERE id = ?',
+      [attributeId]
+    );
+    
+    if (!attributes[0]) {
+      res.status(404).json({ message: 'Attribute not found' });
+      return;
+    }
+
+    // Validate the value against the format pattern
+    const { format_data } = attributes[0];
+    if (format_data) {
+      try {
+        const regex = new RegExp(format_data);
+        if (!regex.test(value)) {
+          res.status(400).json({ message: 'Value does not match the required format pattern' });
+          return;
+        }
+      } catch (err) {
+        console.error('Invalid regex pattern:', err);
+        // If the regex is invalid, we'll still allow the update
+      }
+    }
+
     // Check if value exists
     const [existingValue] = await connection.query<RowDataPacket[]>(
       'SELECT * FROM attribute_value WHERE asset_id = ? AND attribute_id = ?',
