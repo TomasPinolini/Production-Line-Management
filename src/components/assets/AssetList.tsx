@@ -301,22 +301,21 @@ export const AssetList: React.FC = () => {
         {parentChain.map((asset, index) => (
           <React.Fragment key={asset.id}>
             <ChevronRight className="h-4 w-4" />
-            <span
-              className={`cursor-pointer hover:text-blue-600 ${
-                index === parentChain.length - 1 ? 'font-semibold' : ''
-              }`}
-              onClick={() => {
-                const newChain = parentChain.slice(0, index + 1);
-                setParentChain(newChain);
-                setSelectedAsset(newChain[newChain.length - 1]);
-              }}
-            >
+            <span className="font-medium">
               {asset.name}
             </span>
           </React.Fragment>
         ))}
       </div>
     );
+  };
+
+  const handleNavigateToLevel = (index: number) => {
+    // Navigate to the selected level in the hierarchy
+    const newParentChain = parentChain.slice(0, index + 1);
+    const newSelectedAsset = newParentChain[newParentChain.length - 1] || null;
+    setParentChain(newParentChain);
+    setSelectedAsset(newSelectedAsset);
   };
 
   const renderLoadingSkeleton = () => {
@@ -338,35 +337,53 @@ export const AssetList: React.FC = () => {
   const renderAsset = (asset: Asset, level: number = 0) => {
     const isExpanded = expandedAssets.has(asset.id);
     const hasChildren = asset.children && asset.children.length > 0;
+    const isCategory = hasChildren || level === 0; // Consider root level items and items with children as categories
 
     return (
       <div 
         key={asset.id} 
         className={`transition-all duration-200 ease-in-out ${level > 0 ? 'ml-6' : ''}`}
       >
-        <div className="flex items-center justify-between p-2 hover:bg-gray-50 rounded">
+        <div className={`
+          flex items-center justify-between p-2 rounded-md
+          ${isCategory 
+            ? 'bg-gray-50 border border-gray-200 hover:bg-gray-100 mb-2' 
+            : 'hover:bg-gray-50 border-l-2 border-gray-200'
+          }
+        `}>
           <div className="flex items-center space-x-2">
-            {hasChildren && (
+            {hasChildren ? (
               <button
                 onClick={() => handleAssetClick(asset)}
                 className="text-gray-500 hover:text-gray-700"
               >
                 {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
               </button>
+            ) : (
+              <div className="w-4 h-4 flex items-center justify-center">
+                <div className="w-2 h-2 rounded-full bg-gray-400"></div>
+              </div>
             )}
-            <span className="font-medium">{asset.name}</span>
+            <span className={`${isCategory ? 'font-semibold text-gray-700' : 'text-gray-600'}`}>
+              {asset.name}
+              {isCategory && asset.children && (
+                <span className="ml-2 text-xs text-gray-500">
+                  ({asset.children.length} items)
+                </span>
+              )}
+            </span>
           </div>
           <div className="flex space-x-2">
             <button
               onClick={() => handleEditAsset(asset)}
-              className="text-blue-600 hover:text-blue-800"
+              className={`${isCategory ? 'text-blue-600' : 'text-gray-500'} hover:text-blue-800`}
               title="Edit asset"
             >
               <Edit2 className="h-4 w-4" />
             </button>
             <button
               onClick={() => handleDeleteAsset(asset.id)}
-              className="text-red-600 hover:text-red-800"
+              className={`${isCategory ? 'text-red-600' : 'text-gray-500'} hover:text-red-800`}
               title="Delete asset"
             >
               <Trash2 className="h-4 w-4" />
@@ -381,7 +398,7 @@ export const AssetList: React.FC = () => {
           </div>
         </div>
         {isExpanded && hasChildren && (
-          <div className="ml-4 mt-2 space-y-2">
+          <div className="mt-2 space-y-2 pl-4 border-l border-gray-200">
             {asset.children?.map(child => renderAsset(child, level + 1))}
           </div>
         )}
