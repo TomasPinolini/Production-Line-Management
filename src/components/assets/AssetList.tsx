@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Asset, VariableAttribute } from '../../types';
-import { ArrowLeft, Plus, EditIcon, DeleteIcon, CloseIcon, ChevronRight, ChevronDown } from '../../utils/icons';
+import { ArrowLeft, Plus, Edit2, Trash2, X, ChevronRight, ChevronDown, HomeIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
 import AssetForm from './AssetForm';
 import AssetAttributeManager from './AssetAttributeManager';
@@ -37,9 +37,23 @@ export const AssetList: React.FC = () => {
   const fetchRootAssets = async () => {
     try {
       setLoading(true);
+      console.log('🌐 API Request:', {
+        method: 'GET',
+        url: `${API_BASE_URL}/assets/roots`,
+        timestamp: new Date().toISOString()
+      });
+
       const response = await fetch(`${API_BASE_URL}/assets/roots`);
-      if (!response.ok) throw new Error('Failed to fetch root assets');
       const rootData = await response.json();
+
+      console.log('✅ API Response:', {
+        status: response.status,
+        url: `${API_BASE_URL}/assets/roots`,
+        data: rootData,
+        timestamp: new Date().toISOString()
+      });
+      
+      if (!response.ok) throw new Error('Failed to fetch root assets');
       
       setAssets(rootData);
       // Expand root assets by default
@@ -52,7 +66,11 @@ export const AssetList: React.FC = () => {
       setExpandedAssets(newExpanded);
       setLoading(false);
     } catch (err) {
-      console.error('Error loading assets:', err);
+      console.error('❌ API Error:', {
+        url: `${API_BASE_URL}/assets/roots`,
+        error: err instanceof Error ? err.message : 'Unknown error',
+        timestamp: new Date().toISOString()
+      });
       setError('Failed to load assets');
       toast.error('Failed to load assets');
       setLoading(false);
@@ -62,13 +80,31 @@ export const AssetList: React.FC = () => {
   const fetchChildren = async (parentId: number) => {
     try {
       setLoading(true);
+      console.log('🌐 API Request:', {
+        method: 'GET',
+        url: `${API_BASE_URL}/assets/${parentId}`,
+        timestamp: new Date().toISOString()
+      });
+
       const response = await fetch(`${API_BASE_URL}/assets/${parentId}`);
+      const data = await response.json();
+
+      console.log('✅ API Response:', {
+        status: response.status,
+        url: `${API_BASE_URL}/assets/${parentId}`,
+        data,
+        timestamp: new Date().toISOString()
+      });
+
       if (!response.ok) throw new Error('Failed to fetch asset');
-      const asset = await response.json();
-      setAssets(asset.children || []);
+      setAssets(data.children || []);
       setLoading(false);
     } catch (err) {
-      console.error('Error loading children:', err);
+      console.error('❌ API Error:', {
+        url: `${API_BASE_URL}/assets/${parentId}`,
+        error: err instanceof Error ? err.message : 'Unknown error',
+        timestamp: new Date().toISOString()
+      });
       setError('Failed to load children');
       toast.error('Failed to load children');
       setLoading(false);
@@ -82,21 +118,26 @@ export const AssetList: React.FC = () => {
 
   const handleGoBack = () => {
     if (parentChain.length > 0) {
-      const newParentChain = parentChain.slice(0, -1);
-      const newSelectedAsset = newParentChain[newParentChain.length - 1] || null;
-      setParentChain(newParentChain);
-      setSelectedAsset(newSelectedAsset);
+      // Go back to root if we're only one level deep
+      if (parentChain.length === 1) {
+        setParentChain([]);
+        setSelectedAsset(null);
+      } else {
+        const newParentChain = parentChain.slice(0, -1);
+        const newSelectedAsset = newParentChain[newParentChain.length - 1] || null;
+        setParentChain(newParentChain);
+        setSelectedAsset(newSelectedAsset);
+      }
     }
   };
 
-  const handleSubmitAsset = async (data: { 
-    name: string;
-    type: string; 
-    attributes: { 
-      id: number; 
-      value: string; 
-    }[]; 
-  }) => {
+  const handleGoToRoot = () => {
+    setParentChain([]);
+    setSelectedAsset(null);
+    fetchRootAssets();
+  };
+
+  const handleSubmitAsset = async (data: { name: string }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/assets`, {
         method: 'POST',
@@ -105,9 +146,7 @@ export const AssetList: React.FC = () => {
         },
         body: JSON.stringify({
           name: data.name,
-          type: data.type,
-          id_parent: selectedAsset?.id || null,
-          attributes: data.attributes
+          id_parent: selectedAsset?.id || null
         }),
       });
 
@@ -146,9 +185,7 @@ export const AssetList: React.FC = () => {
         name: updatedAsset.name,
         id_parent: updatedAsset.id_parent,
         attributes: updatedAsset.attributes?.map(attr => ({
-          name: attr.name,
-          description: attr.description || '',
-          format_data: attr.format_data || '',
+          id: attr.id,
           value: attr.value || ''
         })) || []
       };
@@ -171,6 +208,7 @@ export const AssetList: React.FC = () => {
       // Update the local state
       setAssets(assets.map(p => p.id === data.id ? data : p));
       setEditingAsset(null);
+      setIsAttributeManagerOpen(false);
       toast.success('Asset updated successfully');
 
       // Refresh the current view to get updated inheritance
@@ -190,19 +228,38 @@ export const AssetList: React.FC = () => {
   };
 
   const handleDeleteAsset = async (id: number) => {
+    if (!window.confirm('Are you sure you want to delete this asset?')) {
+      return;
+    }
+
     try {
+      setLoading(true);
       const response = await fetch(`${API_BASE_URL}/assets/${id}`, {
         method: 'DELETE',
       });
 
-      if (!response.ok) throw new Error('Failed to delete asset');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to delete asset');
+      }
       
-      // Refresh the assets list
-      fetchRootAssets();
+      // Remove the asset from the local state
+      setAssets(assets.filter(p => p.id !== id));
       toast.success('Asset deleted successfully');
+
+      // Refresh the current view
+      if (selectedAsset) {
+        fetchChildren(selectedAsset.id);
+      } else {
+        fetchRootAssets();
+      }
     } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to delete asset';
+      setError(message);
       console.error('Error deleting asset:', err);
-      toast.error('Failed to delete asset');
+      toast.error(message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -225,60 +282,36 @@ export const AssetList: React.FC = () => {
     }
   };
 
-  const handleAddChild = async (parent: Asset) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/assets`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          name: `New Child of ${parent.name}`,
-          id_parent: parent.id,
-        }),
-      });
-
-      if (!response.ok) throw new Error('Failed to create child asset');
-      const newChild = await response.json();
-
-      // Expand the parent to show the new child
-      setExpandedAssets(prev => new Set([...prev, parent.id]));
-
-      // Refresh the current view to show the new child
-      if (selectedAsset) {
-        fetchChildren(selectedAsset.id);
-      } else {
-        fetchRootAssets();
-      }
-
-      setLoading(false);
-      toast.success('Child asset added successfully');
-    } catch (err) {
-      console.error('Error adding child asset:', err);
-      toast.error('Failed to add child asset');
-      setLoading(false);
-    }
+  const handleAddChild = (parent: Asset) => {
+    setSelectedAsset(parent);
+    setIsAddModalOpen(true);
   };
 
   const renderBreadcrumbs = () => {
-    if (breadcrumbs.length === 0) return null;
-
     return (
       <div className="flex items-center space-x-2 mb-4 text-sm text-gray-600">
-        <span className="cursor-pointer hover:text-blue-600" onClick={() => handleBreadcrumbClick(0)}>
-          Root
-        </span>
-        {breadcrumbs.map((crumb, index) => (
-          <React.Fragment key={crumb.id}>
+        <button
+          onClick={handleGoToRoot}
+          className="flex items-center px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors duration-200"
+          title="Go to root level"
+        >
+          <HomeIcon className="h-4 w-4 mr-1" />
+          <span className="font-medium">Root</span>
+        </button>
+        {parentChain.map((asset, index) => (
+          <React.Fragment key={asset.id}>
             <ChevronRight className="h-4 w-4" />
             <span
               className={`cursor-pointer hover:text-blue-600 ${
-                index === breadcrumbs.length - 1 ? 'font-semibold' : ''
+                index === parentChain.length - 1 ? 'font-semibold' : ''
               }`}
-              onClick={() => handleBreadcrumbClick(crumb.id)}
+              onClick={() => {
+                const newChain = parentChain.slice(0, index + 1);
+                setParentChain(newChain);
+                setSelectedAsset(newChain[newChain.length - 1]);
+              }}
             >
-              {crumb.name}
+              {asset.name}
             </span>
           </React.Fragment>
         ))}
@@ -329,14 +362,14 @@ export const AssetList: React.FC = () => {
               className="text-blue-600 hover:text-blue-800"
               title="Edit asset"
             >
-              <EditIcon className="h-4 w-4" />
+              <Edit2 className="h-4 w-4" />
             </button>
             <button
               onClick={() => handleDeleteAsset(asset.id)}
               className="text-red-600 hover:text-red-800"
               title="Delete asset"
             >
-              <DeleteIcon className="h-4 w-4" />
+              <Trash2 className="h-4 w-4" />
             </button>
             <button
               onClick={() => handleAddChild(asset)}
@@ -376,37 +409,35 @@ export const AssetList: React.FC = () => {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center space-x-4">
-          {parentChain.length > 0 && (
-            <button
-              onClick={handleGoBack}
-              className="flex items-center text-blue-600 hover:text-blue-800"
-            >
-              <ArrowLeft className="w-5 h-5 mr-2" />
-              Back
-            </button>
-          )}
-          <h1 className="text-2xl font-bold">
-            {selectedAsset ? `Children of ${selectedAsset.name}` : 'Root Assets'}
-          </h1>
-        </div>
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="flex items-center bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-        >
-          <Plus className="w-5 h-5 mr-2" />
-          Add Asset
-        </button>
-      </div>
-
-      <div className="bg-white rounded-lg shadow">
-        <div className="p-6">
-          {renderBreadcrumbs()}
-          <div className="space-y-2">
-            {assets.map(asset => renderAsset(asset))}
+    <div className="bg-white rounded-lg shadow">
+      <div className="p-6">
+        {renderBreadcrumbs()}
+        <div className="flex justify-between items-center mb-6">
+          <div className="flex items-center space-x-4">
+            {parentChain.length > 0 && (
+              <button
+                onClick={handleGoBack}
+                className="flex items-center text-blue-600 hover:text-blue-800"
+              >
+                <ArrowLeft className="w-5 h-5 mr-2" />
+                Back to {parentChain.length === 1 ? 'Root' : parentChain[parentChain.length - 2].name}
+              </button>
+            )}
+            <h1 className="text-2xl font-bold">
+              {selectedAsset ? `Children of ${selectedAsset.name}` : 'Root Assets'}
+            </h1>
           </div>
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="flex items-center bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Add {selectedAsset ? 'Child' : 'Root'} Asset
+          </button>
+        </div>
+
+        <div className="space-y-2">
+          {assets.map(asset => renderAsset(asset))}
         </div>
       </div>
 
@@ -419,13 +450,12 @@ export const AssetList: React.FC = () => {
                 onClick={() => setIsAddModalOpen(false)}
                 className="text-gray-500 hover:text-gray-700"
               >
-                <CloseIcon size={24} />
+                <X size={24} />
               </button>
             </div>
             <AssetForm
               onSubmit={handleSubmitAsset}
               onCancel={() => setIsAddModalOpen(false)}
-              attributes={[]}
             />
           </div>
         </div>
@@ -440,7 +470,7 @@ export const AssetList: React.FC = () => {
                 onClick={handleCloseEdit}
                 className="text-gray-500 hover:text-gray-700"
               >
-                <CloseIcon size={24} />
+                <X size={24} />
               </button>
             </div>
             <AssetAttributeManager
@@ -459,4 +489,6 @@ export const AssetList: React.FC = () => {
       )}
     </div>
   );
-}; 
+};
+
+export default AssetList; 
