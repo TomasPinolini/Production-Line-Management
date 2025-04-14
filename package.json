@@ -12,9 +12,9 @@
     "build": "tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview",
-    "server:dev": "cross-env NODE_ENV=development tsx watch src/server/index.ts",
+    "server:dev": "tsx watch src/server/server.ts",
     "server:build": "tsc -p tsconfig.server.json",
-    "server:prod": "cross-env NODE_ENV=production node dist/server/index.js",
+    "server:prod": "cross-env NODE_ENV=production node dist/server/server.js",
     "server": "npm run server:dev"
   },
   "dependencies": {

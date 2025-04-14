@@ -4,16 +4,16 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
-const db_1 = __importDefault(require("../db"));
-const express_async_handler_1 = __importDefault(require("express-async-handler"));
+const asyncHandler_1 = __importDefault(require("../utils/asyncHandler"));
+const db_js_1 = __importDefault(require("../db.js"));
 const router = (0, express_1.Router)();
 // Get all root assets (those with null parent)
-router.get('/roots', (0, express_async_handler_1.default)(async (req, res) => {
-    const [rootAssets] = await db_1.default.query('SELECT * FROM asset WHERE id_parent IS NULL ORDER BY name ASC');
+router.get('/roots', (0, asyncHandler_1.default)(async (_req, res) => {
+    const [rootAssets] = await db_js_1.default.query('SELECT * FROM asset WHERE id_parent IS NULL ORDER BY name ASC');
     // For each root asset, fetch their complete hierarchy
     const rootsWithHierarchy = await Promise.all(rootAssets.map(async (root) => {
         // Get all descendants using recursive CTE
-        const [descendants] = await db_1.default.query(`WITH RECURSIVE asset_hierarchy AS (
+        const [descendants] = await db_js_1.default.query(`WITH RECURSIVE asset_hierarchy AS (
           -- Base case: direct children of the current root
           SELECT 
             a.*,
@@ -52,14 +52,14 @@ router.get('/roots', (0, express_async_handler_1.default)(async (req, res) => {
     res.json(rootsWithHierarchy);
 }));
 // Get all assets
-router.get('/', (0, express_async_handler_1.default)(async (req, res) => {
-    const [assets] = await db_1.default.query('SELECT * FROM asset');
+router.get('/', (0, asyncHandler_1.default)(async (_req, res) => {
+    const [assets] = await db_js_1.default.query('SELECT * FROM asset');
     res.json(assets);
 }));
 // Get a single asset by ID with its children and attributes
-router.get('/:id', (0, express_async_handler_1.default)(async (req, res) => {
+router.get('/:id', (0, asyncHandler_1.default)(async (req, res) => {
     const { id } = req.params;
-    const connection = await db_1.default.getConnection();
+    const connection = await db_js_1.default.getConnection();
     try {
         // Get asset basic info
         const [assets] = await connection.query('SELECT * FROM asset WHERE id = ?', [id]);
@@ -94,30 +94,68 @@ router.get('/:id', (0, express_async_handler_1.default)(async (req, res) => {
     }
 }));
 // Create a new asset
-router.post('/', (0, express_async_handler_1.default)(async (req, res) => {
+router.post('/', (0, asyncHandler_1.default)(async (req, res) => {
     const { name, id_parent } = req.body;
-    const [result] = await db_1.default.query('INSERT INTO asset (name, id_parent) VALUES (?, ?)', [name, id_parent]);
-    const [newAsset] = await db_1.default.query('SELECT * FROM asset WHERE id = ?', [result.insertId]);
+    const [result] = await db_js_1.default.query('INSERT INTO asset (name, id_parent) VALUES (?, ?)', [name, id_parent]);
+    const [newAsset] = await db_js_1.default.query('SELECT * FROM asset WHERE id = ?', [result.insertId]);
     res.status(201).json(newAsset[0]);
 }));
 // Update an asset
-router.put('/:id', (0, express_async_handler_1.default)(async (req, res) => {
+router.put('/:id', (0, asyncHandler_1.default)(async (req, res) => {
     const { id } = req.params;
-    const { name, id_parent } = req.body;
-    await db_1.default.query('UPDATE asset SET name = ?, id_parent = ? WHERE id = ?', [name, id_parent, id]);
-    const [updatedAsset] = await db_1.default.query('SELECT * FROM asset WHERE id = ?', [id]);
-    res.json(updatedAsset[0]);
+    const { name, id_parent, attributes } = req.body;
+    const connection = await db_js_1.default.getConnection();
+    await connection.beginTransaction();
+    try {
+        // Update asset basic info
+        await connection.query('UPDATE asset SET name = ?, id_parent = ? WHERE id = ?', [name, id_parent, id]);
+        // Update attributes if provided
+        if (attributes && attributes.length > 0) {
+            for (const attr of attributes) {
+                if (attr.value) {
+                    // Check if value exists
+                    const [existingValue] = await connection.query('SELECT * FROM attribute_value WHERE asset_id = ? AND attribute_id = ?', [id, attr.id]);
+                    if (existingValue[0]) {
+                        // Update existing value
+                        await connection.query('UPDATE attribute_value SET value = ? WHERE asset_id = ? AND attribute_id = ?', [attr.value, id, attr.id]);
+                    }
+                    else {
+                        // Insert new value
+                        await connection.query('INSERT INTO attribute_value (asset_id, attribute_id, value) VALUES (?, ?, ?)', [id, attr.id, attr.value]);
+                    }
+                    // Record in history
+                    await connection.query('INSERT INTO history (asset_id, attribute_id, value) VALUES (?, ?, ?)', [id, attr.id, attr.value]);
+                }
+            }
+        }
+        await connection.commit();
+        // Get updated asset with attributes
+        const [updatedAsset] = await connection.query('SELECT * FROM asset WHERE id = ?', [id]);
+        // Get asset's attributes
+        const [assetAttributes] = await connection.query('SELECT va.*, av.value FROM variable_attribute va ' +
+            'LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.asset_id = ? ' +
+            'WHERE va.asset_id = ?', [id, id]);
+        updatedAsset[0].attributes = assetAttributes;
+        res.json(updatedAsset[0]);
+    }
+    catch (error) {
+        await connection.rollback();
+        throw error;
+    }
+    finally {
+        connection.release();
+    }
 }));
 // Delete an asset
-router.delete('/:id', (0, express_async_handler_1.default)(async (req, res) => {
+router.delete('/:id', (0, asyncHandler_1.default)(async (req, res) => {
     const { id } = req.params;
-    await db_1.default.query('DELETE FROM asset WHERE id = ?', [id]);
+    await db_js_1.default.query('DELETE FROM asset WHERE id = ?', [id]);
     res.status(204).send();
 }));
 // Get all attributes for an asset
-router.get('/:id/attributes', (0, express_async_handler_1.default)(async (req, res) => {
+router.get('/:id/attributes', (0, asyncHandler_1.default)(async (req, res) => {
     const { id } = req.params;
-    const [attributes] = await db_1.default.query(`
+    const [attributes] = await db_js_1.default.query(`
     SELECT va.*, av.value 
     FROM variable_attribute va
     LEFT JOIN attribute_value av ON va.id = av.attribute_id AND av.asset_id = ?
@@ -126,12 +164,26 @@ router.get('/:id/attributes', (0, express_async_handler_1.default)(async (req, r
     res.json(attributes);
 }));
 // Add a new attribute to an asset
-router.post('/:id/attributes', (0, express_async_handler_1.default)(async (req, res) => {
+router.post('/:id/attributes', (0, asyncHandler_1.default)(async (req, res) => {
     const { id } = req.params;
     const { name, description, format_data, value } = req.body;
-    const connection = await db_1.default.getConnection();
+    const connection = await db_js_1.default.getConnection();
     await connection.beginTransaction();
     try {
+        // Validate the value against the format pattern if both are provided
+        if (format_data && value !== undefined) {
+            try {
+                const regex = new RegExp(format_data);
+                if (!regex.test(value)) {
+                    res.status(400).json({ message: 'Value does not match the provided format pattern' });
+                    return;
+                }
+            }
+            catch (err) {
+                console.error('Invalid regex pattern:', err);
+                // If the regex is invalid, we'll still allow the creation
+            }
+        }
         // Insert the attribute definition
         const [result] = await connection.query('INSERT INTO variable_attribute (asset_id, name, description, format_data) VALUES (?, ?, ?, ?)', [id, name, description, format_data]);
         // Insert the attribute value if provided
@@ -140,7 +192,7 @@ router.post('/:id/attributes', (0, express_async_handler_1.default)(async (req, 
         }
         await connection.commit();
         // Get the complete attribute with its value
-        const [attribute] = await db_1.default.query(`
+        const [attribute] = await db_js_1.default.query(`
       SELECT va.*, av.value 
       FROM variable_attribute va
       LEFT JOIN attribute_value av ON va.id = av.attribute_id AND av.asset_id = ?
@@ -157,12 +209,33 @@ router.post('/:id/attributes', (0, express_async_handler_1.default)(async (req, 
     }
 }));
 // Update an attribute value
-router.put('/:id/attributes/:attributeId', (0, express_async_handler_1.default)(async (req, res) => {
+router.put('/:id/attributes/:attributeId', (0, asyncHandler_1.default)(async (req, res) => {
     const { id, attributeId } = req.params;
     const { value } = req.body;
-    const connection = await db_1.default.getConnection();
+    const connection = await db_js_1.default.getConnection();
     await connection.beginTransaction();
     try {
+        // Get the attribute format pattern
+        const [attributes] = await connection.query('SELECT format_data FROM variable_attribute WHERE id = ?', [attributeId]);
+        if (!attributes[0]) {
+            res.status(404).json({ message: 'Attribute not found' });
+            return;
+        }
+        // Validate the value against the format pattern
+        const { format_data } = attributes[0];
+        if (format_data) {
+            try {
+                const regex = new RegExp(format_data);
+                if (!regex.test(value)) {
+                    res.status(400).json({ message: 'Value does not match the required format pattern' });
+                    return;
+                }
+            }
+            catch (err) {
+                console.error('Invalid regex pattern:', err);
+                // If the regex is invalid, we'll still allow the update
+            }
+        }
         // Check if value exists
         const [existingValue] = await connection.query('SELECT * FROM attribute_value WHERE asset_id = ? AND attribute_id = ?', [id, attributeId]);
         if (existingValue[0]) {
@@ -177,7 +250,7 @@ router.put('/:id/attributes/:attributeId', (0, express_async_handler_1.default)(
         await connection.query('INSERT INTO history (asset_id, attribute_id, value) VALUES (?, ?, ?)', [id, attributeId, value]);
         await connection.commit();
         // Get the updated attribute with its value
-        const [attribute] = await db_1.default.query(`
+        const [attribute] = await db_js_1.default.query(`
       SELECT va.*, av.value 
       FROM variable_attribute va
       LEFT JOIN attribute_value av ON va.id = av.attribute_id AND av.asset_id = ?
@@ -193,4 +266,104 @@ router.put('/:id/attributes/:attributeId', (0, express_async_handler_1.default)(
         connection.release();
     }
 }));
+// Get all categories with their attributes
+router.get('/categories', (0, asyncHandler_1.default)(async (_req, res) => {
+    console.log('Categories endpoint called');
+    const connection = await db_js_1.default.getConnection();
+    try {
+        console.log('Getting categories from database');
+        // Get all categories (assets that have attributes defined)
+        const [categories] = await connection.query(`SELECT DISTINCT a.* 
+       FROM asset a
+       JOIN variable_attribute va ON va.asset_id = a.id
+       WHERE a.id_parent IS NULL
+       ORDER BY a.id`);
+        console.log('Categories found:', categories);
+        if (!categories || categories.length === 0) {
+            console.log('No categories found, returning empty array');
+            res.json([]);
+            return;
+        }
+        // For each category, get its attributes
+        const categoriesWithAttributes = await Promise.all(categories.map(async (category) => {
+            const [attributes] = await connection.query(`SELECT va.id, va.name, va.description, va.format_data
+           FROM variable_attribute va
+           WHERE va.asset_id = ?`, [category.id]);
+            return {
+                ...category,
+                attributes: attributes || []
+            };
+        }));
+        console.log('Categories with attributes:', categoriesWithAttributes);
+        res.json(categoriesWithAttributes);
+    }
+    catch (error) {
+        console.error('Error fetching categories:', error);
+        res.status(500).json({ message: 'Internal server error' });
+    }
+    finally {
+        connection.release();
+    }
+}));
+// Get instances of a category with their attribute values
+router.get('/instances/:categoryId', (0, asyncHandler_1.default)(async (req, res) => {
+    const { categoryId } = req.params;
+    const connection = await db_js_1.default.getConnection();
+    try {
+        // Get all instances of the category
+        const [instances] = await connection.query(`SELECT a.*
+       FROM asset a
+       WHERE a.id_parent = ?
+       ORDER BY a.id`, [categoryId]);
+        // Get attribute values for each instance
+        const instancesWithValues = await Promise.all(instances.map(async (instance) => {
+            const [attributeValues] = await connection.query(`SELECT av.id, av.attribute_id, av.value
+           FROM attribute_value av
+           WHERE av.asset_id = ?`, [instance.id]);
+            return {
+                ...instance,
+                attributeValues
+            };
+        }));
+        res.json(instancesWithValues);
+    }
+    finally {
+        connection.release();
+    }
+}));
+// Create a new instance
+router.post('/instances', (0, asyncHandler_1.default)(async (req, res) => {
+    const { name, id_parent, attributeValues } = req.body;
+    const connection = await db_js_1.default.getConnection();
+    try {
+        await connection.beginTransaction();
+        // Insert the asset
+        const [result] = await connection.query('INSERT INTO asset (name, id_parent, created_at, updated_at) VALUES (?, ?, NOW(), NOW())', [name, id_parent]);
+        const instanceId = result.insertId;
+        // Insert attribute values
+        if (attributeValues && attributeValues.length > 0) {
+            for (const { attribute_id, value } of attributeValues) {
+                await connection.query('INSERT INTO attribute_value (asset_id, attribute_id, value, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())', [instanceId, attribute_id, value]);
+            }
+        }
+        await connection.commit();
+        // Get the created instance with its values
+        const [instance] = await connection.query('SELECT * FROM asset WHERE id = ?', [instanceId]);
+        const [attributeValues] = await connection.query(`SELECT av.id, av.attribute_id, av.value
+       FROM attribute_value av
+       WHERE av.asset_id = ?`, [instanceId]);
+        res.status(201).json({
+            ...instance[0],
+            attributeValues
+        });
+    }
+    catch (error) {
+        await connection.rollback();
+        throw error;
+    }
+    finally {
+        connection.release();
+    }
+}));
 exports.default = router;
+//# sourceMappingURL=assets.js.map

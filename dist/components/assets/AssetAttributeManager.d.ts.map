@@ -1,0 +1,1 @@
+{"version":3,"file":"AssetAttributeManager.d.ts","sourceRoot":"","sources":["../../../src/components/assets/AssetAttributeManager.tsx"],"names":[],"mappings":"AAAA,OAAO,KAA8B,MAAM,OAAO,CAAC;AAanD,UAAU,KAAK;IACb,OAAO,EAAE,MAAM,CAAC;IAChB,kBAAkB,CAAC,EAAE,MAAM,IAAI,CAAC;CACjC;AAED,QAAA,MAAM,qBAAqB,EAAE,KAAK,CAAC,EAAE,CAAC,KAAK,CA0Y1C,CAAC;AAEF,eAAe,qBAAqB,CAAC"}

@@ -12,16 +12,17 @@ const port = 3000;
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
 // Test route
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
     res.json({ message: 'Production Line Management API is running' });
 });
 // Routes
 app.use('/api/assets', assets_1.default);
 // Error handling middleware
-app.use((err, req, res, next) => {
+app.use((err, _req, res, _next) => {
     console.error(err.stack);
     res.status(500).json({ error: 'Something went wrong!' });
 });
 app.listen(port, () => {
     console.log(`Server running at http://localhost:${port}`);
 });
+//# sourceMappingURL=index.js.map

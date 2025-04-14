@@ -25,6 +25,7 @@ export const AssetList: React.FC = () => {
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
   const [isAttributeManagerOpen, setIsAttributeManagerOpen] = useState(false);
+  const [parentAttributes, setParentAttributes] = useState<VariableAttribute[]>([]);
 
   useEffect(() => {
     if (selectedAsset) {
@@ -33,6 +34,25 @@ export const AssetList: React.FC = () => {
       fetchRootAssets();
     }
   }, [selectedAsset]);
+
+  useEffect(() => {
+    // Fetch parent attributes when opening the add modal
+    if (isAddModalOpen && selectedAsset) {
+      fetchParentAttributes(selectedAsset.id);
+    }
+  }, [isAddModalOpen, selectedAsset]);
+
+  const fetchParentAttributes = async (parentId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/assets/${parentId}/attributes`);
+      if (!response.ok) throw new Error('Failed to fetch parent attributes');
+      const attributes = await response.json();
+      setParentAttributes(attributes);
+    } catch (error) {
+      console.error('Error fetching parent attributes:', error);
+      toast.error('Failed to fetch parent attributes');
+    }
+  };
 
   const fetchRootAssets = async () => {
     try {
@@ -137,7 +157,13 @@ export const AssetList: React.FC = () => {
     fetchRootAssets();
   };
 
-  const handleSubmitAsset = async (data: { name: string }) => {
+  const handleSubmitAsset = async (data: { 
+    name: string; 
+    attributes: { 
+      id: number; 
+      value: string; 
+    }[]; 
+  }) => {
     try {
       const response = await fetch(`${API_BASE_URL}/assets`, {
         method: 'POST',
@@ -146,7 +172,8 @@ export const AssetList: React.FC = () => {
         },
         body: JSON.stringify({
           name: data.name,
-          id_parent: selectedAsset?.id || null
+          id_parent: selectedAsset?.id || null,
+          attributes: data.attributes
         }),
       });
 
@@ -459,18 +486,12 @@ export const AssetList: React.FC = () => {
       </div>
 
       {isAddModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg p-6 max-w-lg w-full">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Add New Asset</h2>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X size={24} />
-              </button>
-            </div>
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-6 max-w-2xl w-full">
+            <h2 className="text-xl font-semibold mb-4">Add New Asset</h2>
             <AssetForm
+              attributes={parentAttributes}
+              parentId={selectedAsset?.id}
               onSubmit={handleSubmitAsset}
               onCancel={() => setIsAddModalOpen(false)}
             />
