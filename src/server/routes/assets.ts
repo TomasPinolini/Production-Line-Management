@@ -379,4 +379,129 @@ router.put('/:id/attributes/:attributeId', asyncHandler(async (req: Request, res
   }
 }));
 
+// Get all categories with their attributes
+router.get('/categories', asyncHandler(async (_req: Request, res: Response) => {
+  const connection = await pool.getConnection();
+  try {
+    // Get all categories (assets that have attributes defined)
+    const [categories] = await connection.query<RowDataPacket[]>(
+      `SELECT DISTINCT a.* 
+       FROM asset a
+       JOIN variable_attribute va ON va.asset_id = a.id
+       WHERE a.id_parent IS NULL
+       ORDER BY a.id`
+    );
+
+    // For each category, get its attributes
+    const categoriesWithAttributes = await Promise.all(
+      categories.map(async (category) => {
+        const [attributes] = await connection.query<RowDataPacket[]>(
+          `SELECT va.id, va.name, va.description, va.format_data
+           FROM variable_attribute va
+           WHERE va.asset_id = ?`,
+          [category.id]
+        );
+        return {
+          ...category,
+          attributes
+        };
+      })
+    );
+
+    res.json(categoriesWithAttributes);
+  } finally {
+    connection.release();
+  }
+}));
+
+// Get instances of a category with their attribute values
+router.get('/instances/:categoryId', asyncHandler(async (req: Request, res: Response) => {
+  const { categoryId } = req.params;
+  const connection = await pool.getConnection();
+  
+  try {
+    // Get all instances of the category
+    const [instances] = await connection.query<RowDataPacket[]>(
+      `SELECT a.*
+       FROM asset a
+       WHERE a.id_parent = ?
+       ORDER BY a.id`,
+      [categoryId]
+    );
+
+    // Get attribute values for each instance
+    const instancesWithValues = await Promise.all(
+      instances.map(async (instance) => {
+        const [attributeValues] = await connection.query<RowDataPacket[]>(
+          `SELECT av.id, av.attribute_id, av.value
+           FROM attribute_value av
+           WHERE av.asset_id = ?`,
+          [instance.id]
+        );
+        return {
+          ...instance,
+          attributeValues
+        };
+      })
+    );
+
+    res.json(instancesWithValues);
+  } finally {
+    connection.release();
+  }
+}));
+
+// Create a new instance
+router.post('/instances', asyncHandler(async (req: Request, res: Response) => {
+  const { name, id_parent, attributeValues } = req.body;
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    // Insert the asset
+    const [result] = await connection.query<ResultSetHeader>(
+      'INSERT INTO asset (name, id_parent, created_at, updated_at) VALUES (?, ?, NOW(), NOW())',
+      [name, id_parent]
+    );
+    
+    const instanceId = result.insertId;
+
+    // Insert attribute values
+    if (attributeValues && attributeValues.length > 0) {
+      for (const { attribute_id, value } of attributeValues) {
+        await connection.query(
+          'INSERT INTO attribute_value (asset_id, attribute_id, value, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
+          [instanceId, attribute_id, value]
+        );
+      }
+    }
+
+    await connection.commit();
+
+    // Get the created instance with its values
+    const [instance] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM asset WHERE id = ?',
+      [instanceId]
+    );
+
+    const [attributeValues] = await connection.query<RowDataPacket[]>(
+      `SELECT av.id, av.attribute_id, av.value
+       FROM attribute_value av
+       WHERE av.asset_id = ?`,
+      [instanceId]
+    );
+
+    res.status(201).json({
+      ...instance[0],
+      attributeValues
+    });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
 export default router; 
