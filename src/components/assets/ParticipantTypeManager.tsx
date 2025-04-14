@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Pencil, Trash2 } from 'lucide-react';
+import { Plus, EditIcon, DeleteIcon } from '../../utils/icons';
 import toast from 'react-hot-toast';
 import { ParticipantType, VariableAttribute } from '../../types';
 import VariableAttributeManager from './VariableAttributeManager';

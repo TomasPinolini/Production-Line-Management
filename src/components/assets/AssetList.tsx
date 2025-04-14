@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Asset, VariableAttribute } from '../../types';
-import { ArrowLeft, Plus, Pencil, Trash2, X, ChevronRight, ChevronDown, Edit2 } from 'lucide-react';
+import { ArrowLeft, Plus, EditIcon, DeleteIcon, CloseIcon, ChevronRight, ChevronDown } from '../../utils/icons';
 import toast from 'react-hot-toast';
 import AssetForm from './AssetForm';
 import AssetAttributeManager from './AssetAttributeManager';
@@ -24,6 +24,7 @@ export const AssetList: React.FC = () => {
   const [expandedAssets, setExpandedAssets] = useState<Set<number>>(new Set());
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
   const [editingAsset, setEditingAsset] = useState<Asset | null>(null);
+  const [isAttributeManagerOpen, setIsAttributeManagerOpen] = useState(false);
 
   useEffect(() => {
     if (selectedAsset) {
@@ -89,7 +90,8 @@ export const AssetList: React.FC = () => {
   };
 
   const handleSubmitAsset = async (data: { 
-    name: string; 
+    name: string;
+    type: string; 
     attributes: { 
       id: number; 
       value: string; 
@@ -103,6 +105,7 @@ export const AssetList: React.FC = () => {
         },
         body: JSON.stringify({
           name: data.name,
+          type: data.type,
           id_parent: selectedAsset?.id || null,
           attributes: data.attributes
         }),
@@ -127,10 +130,12 @@ export const AssetList: React.FC = () => {
 
   const handleEditAsset = (asset: Asset) => {
     setEditingAsset(asset);
+    setIsAttributeManagerOpen(true);
   };
 
   const handleCloseEdit = () => {
     setEditingAsset(null);
+    setIsAttributeManagerOpen(false);
   };
 
   const handleAssetUpdate = async (updatedAsset: Asset) => {
@@ -324,14 +329,14 @@ export const AssetList: React.FC = () => {
               className="text-blue-600 hover:text-blue-800"
               title="Edit asset"
             >
-              <Edit2 className="h-4 w-4" />
+              <EditIcon className="h-4 w-4" />
             </button>
             <button
               onClick={() => handleDeleteAsset(asset.id)}
               className="text-red-600 hover:text-red-800"
               title="Delete asset"
             >
-              <Trash2 className="h-4 w-4" />
+              <DeleteIcon className="h-4 w-4" />
             </button>
             <button
               onClick={() => handleAddChild(asset)}
@@ -406,29 +411,48 @@ export const AssetList: React.FC = () => {
       </div>
 
       {isAddModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">
-                Add {selectedAsset ? 'Child' : 'Root'} Asset
-              </h2>
+              <h2 className="text-xl font-semibold">Add New Asset</h2>
               <button
                 onClick={() => setIsAddModalOpen(false)}
                 className="text-gray-500 hover:text-gray-700"
               >
-                <X className="w-5 h-5" />
+                <CloseIcon size={24} />
               </button>
             </div>
             <AssetForm
-              typeId="root"
-              asset={selectedAsset ? {
-                id_Asset: selectedAsset.id,
-                name: selectedAsset.name,
-                attributeValues: {}
-              } : undefined}
-              attributes={[]}
               onSubmit={handleSubmitAsset}
               onCancel={() => setIsAddModalOpen(false)}
+              attributes={[]}
+            />
+          </div>
+        </div>
+      )}
+
+      {isAttributeManagerOpen && editingAsset && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-semibold">Edit Attributes - {editingAsset.name}</h2>
+              <button
+                onClick={handleCloseEdit}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <CloseIcon size={24} />
+              </button>
+            </div>
+            <AssetAttributeManager
+              assetId={editingAsset.id}
+              onAttributesChange={() => {
+                // Refresh the assets list when attributes change
+                if (selectedAsset) {
+                  fetchChildren(selectedAsset.id);
+                } else {
+                  fetchRootAssets();
+                }
+              }}
             />
           </div>
         </div>

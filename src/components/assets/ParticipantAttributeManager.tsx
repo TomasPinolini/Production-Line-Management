@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Pencil, Trash2, ChevronRight } from 'lucide-react';
+import { Plus, EditIcon, DeleteIcon, ChevronRight } from '../../utils/icons';
 import { VariableAttribute, Participant } from '../../types';
 import toast from 'react-hot-toast';
 
@@ -369,13 +369,13 @@ const ParticipantAttributeManager: React.FC<Props> = ({ participantId, onAttribu
                                   onClick={() => setEditingAttribute(attribute)}
                                   className="text-blue-600 hover:text-blue-900"
                                 >
-                                  <Pencil className="h-4 w-4" />
+                                  <EditIcon className="h-4 w-4" />
                                 </button>
                                 <button
                                   onClick={() => handleDeleteAttribute(attribute.id)}
                                   className="text-red-600 hover:text-red-900"
                                 >
-                                  <Trash2 className="h-4 w-4" />
+                                  <DeleteIcon className="h-4 w-4" />
                                 </button>
                               </div>
                             )}

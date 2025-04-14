@@ -1,4 +1,5 @@
-export interface Asset {
+// Base Types
+interface Asset {
   id: number;
   name: string;
   type: string;
@@ -9,35 +10,57 @@ export interface Asset {
   attributes?: VariableAttribute[];
 }
 
-export interface VariableAttribute {
+interface VariableAttribute {
   id: number;
-  asset_id: number;
   name: string;
   description?: string;
   format_data?: string;
   value?: string;
+  asset_id?: number;
+  participant_id?: number;
   created_at?: string;
   updated_at?: string;
 }
 
-export interface AttributeValue {
+interface Participant {
   id: number;
-  asset_id: number;
-  attribute_id: number;
-  value: string;
+  name: string;
+  type: string;
+  id_parent: number | null;
+  id_PT?: number;  // Participant Type ID
+  description?: string;
+  children?: Participant[];
+  attributes: VariableAttribute[];
   created_at?: string;
   updated_at?: string;
 }
 
-export interface History {
+interface ParticipantType {
   id: number;
-  asset_id: number;
-  attribute_id: number;
-  value: string;
-  ts: string;
+  id_PT?: number;  // Some responses use id_PT instead of id
+  name: string;
+  description?: string;
+  attributes?: VariableAttribute[];
+  created_at?: string;
+  updated_at?: string;
 }
 
-export interface ProductionOrder {
+interface ApiResponse<T> {
+  data: T;
+  message?: string;
+  error?: string;
+}
+
+interface ParticipantFormData {
+  name: string;
+  attributes: {
+    id: number;
+    value: string;
+  }[];
+}
+
+// Production Core Types
+interface ProductionOrder {
   id: number;
   material_number?: string;
   serial_number?: string;
@@ -47,7 +70,7 @@ export interface ProductionOrder {
   updated_at?: string;
 }
 
-export interface Process {
+interface Process {
   id: number;
   order_id: number;
   ts_from?: string;
@@ -56,7 +79,7 @@ export interface Process {
   updated_at?: string;
 }
 
-export interface ProcessStep {
+interface ProcessStep {
   id: number;
   process_id: number;
   ts_from?: string;
@@ -66,7 +89,7 @@ export interface ProcessStep {
   updated_at?: string;
 }
 
-export interface Step {
+interface Step {
   id: number;
   process_step_id: number;
   result?: string;
@@ -74,7 +97,7 @@ export interface Step {
   updated_at?: string;
 }
 
-export interface StepParticipant {
+interface StepParticipant {
   id: number;
   step_id: number;
   participant_id: number;
@@ -83,7 +106,7 @@ export interface StepParticipant {
   updated_at?: string;
 }
 
-export interface ResultDetail {
+interface ResultDetail {
   id: number;
   step_id: number;
   update_id: number;
@@ -91,21 +114,40 @@ export interface ResultDetail {
   updated_at?: string;
 }
 
-// Helper type for form handling
-export interface DynamicFormData {
+// Helper types
+interface DynamicFormData {
   participant_name: string;
   attributes: Record<string, string>;
 }
 
-// Enums for our known asset types
-export enum AssetTypes {
+enum AssetTypes {
   DEVICE = 'device',
   TOOL = 'tool',
   STATION = 'station'
 }
 
-export interface AssetType {
+interface AssetType {
   id: number;
   name: string;
   attributes: VariableAttribute[];
 }
+
+// Export all types
+export type {
+  Asset,
+  VariableAttribute,
+  Participant,
+  ParticipantType,
+  ApiResponse,
+  ParticipantFormData,
+  ProductionOrder,
+  Process,
+  ProcessStep,
+  Step,
+  StepParticipant,
+  ResultDetail,
+  DynamicFormData,
+  AssetType
+};
+
+export { AssetTypes }; 

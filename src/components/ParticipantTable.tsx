@@ -1,6 +1,6 @@
 import React from 'react';
-import { Participant, VariableAttribute } from '../types';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Edit2, Trash2 } from 'lucide-react';
+import type { Participant, VariableAttribute } from '../types';
 
 interface ParticipantTableProps {
   participants: Participant[];
@@ -58,11 +58,11 @@ export function ParticipantTable({
                   </td>
                   {attributes.map((attr) => (
                     <td key={attr.id} className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                      {participant.attributes[attr.id] || '-'}
+                      {participant.attributes?.find(a => a.id === attr.id)?.value || '-'}
                     </td>
                   ))}
                   <td className="whitespace-nowrap px-3 py-4 text-sm text-gray-500">
-                    {new Date(participant.created_at).toLocaleDateString()}
+                    {participant.created_at ? new Date(participant.created_at).toLocaleDateString() : '-'}
                   </td>
                   <td className="relative whitespace-nowrap py-4 pl-3 pr-4 text-right text-sm font-medium sm:pr-0">
                     <div className="flex justify-end gap-2">
@@ -71,7 +71,7 @@ export function ParticipantTable({
                           onClick={() => onEdit(participant)}
                           className="text-blue-600 hover:text-blue-900"
                         >
-                          <Pencil className="h-4 w-4" />
+                          <Edit2 className="h-4 w-4" />
                         </button>
                       )}
                       {onDelete && (

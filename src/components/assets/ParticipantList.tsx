@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { Participant, VariableAttribute } from '../../types';
-import { ArrowLeft, Plus, Pencil, Trash2, X, ChevronRight, ChevronDown, Edit2 } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { useNavigate } from 'react-router-dom';
+import { Plus, ArrowLeft, Edit2, Trash2, ChevronRight, ChevronDown, X } from 'lucide-react';
+import type { Participant, VariableAttribute } from '../../types';
 import ParticipantForm from './ParticipantForm';
+import toast from 'react-hot-toast';
 import ParticipantAttributeManager from './ParticipantAttributeManager';
 
 const API_BASE_URL = 'http://localhost:3000/api';
@@ -13,7 +13,11 @@ interface Breadcrumb {
   name: string;
 }
 
-export const ParticipantList: React.FC = () => {
+interface Props {
+  onClose: () => void;
+}
+
+export const ParticipantList: React.FC<Props> = ({ onClose }) => {
   const navigate = useNavigate();
   const [participants, setParticipants] = useState<Participant[]>([]);
   const [selectedParticipant, setSelectedParticipant] = useState<Participant | null>(null);
@@ -24,6 +28,7 @@ export const ParticipantList: React.FC = () => {
   const [expandedParticipants, setExpandedParticipants] = useState<Set<number>>(new Set());
   const [breadcrumbs, setBreadcrumbs] = useState<Breadcrumb[]>([]);
   const [editingParticipant, setEditingParticipant] = useState<Participant | null>(null);
+  const [showForm, setShowForm] = useState(false);
 
   useEffect(() => {
     if (selectedParticipant) {
@@ -141,7 +146,7 @@ export const ParticipantList: React.FC = () => {
       const updatePayload = {
         name: updatedParticipant.name,
         id_parent: updatedParticipant.id_parent,
-        attributes: updatedParticipant.attributes?.map(attr => ({
+        attributes: updatedParticipant.attributes?.map((attr: VariableAttribute) => ({
           name: attr.name,
           description: attr.description || '',
           format_data: attr.format_data || '',
@@ -348,7 +353,7 @@ export const ParticipantList: React.FC = () => {
         </div>
         {isExpanded && hasChildren && (
           <div className="ml-4 transition-all duration-200 ease-in-out">
-            {participant.children?.map(child => renderParticipant(child, level + 1))}
+            {participant.children?.map((child: Participant) => renderParticipant(child, level + 1))}
           </div>
         )}
       </div>

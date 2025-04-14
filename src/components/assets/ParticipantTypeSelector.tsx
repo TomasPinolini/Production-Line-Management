@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ParticipantType } from '../../types';
-import { Users } from 'lucide-react';
+import type { ParticipantType, ApiResponse } from '../../types';
+import { UsersIcon } from '../../utils/icons';
 import toast from 'react-hot-toast';
 
 const API_BASE_URL = 'http://localhost:3000/api';
@@ -21,12 +21,15 @@ export const ParticipantTypeSelector: React.FC = () => {
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/participant-types`);
       if (!response.ok) throw new Error('Failed to fetch participant types');
-      const data = await response.json();
-      const transformedData = data.map((type: any) => ({
-        id_PT: type.id,
-        name: type.name,
+      const data: ApiResponse<ParticipantType[]> = await response.json();
+      
+      // Transform the data to ensure consistent ID handling
+      const transformedData: ParticipantType[] = data.data.map((type: ParticipantType) => ({
+        ...type,
+        id: type.id_PT || type.id, // Handle both id and id_PT
         attributes: type.attributes || []
       }));
+      
       setTypes(transformedData);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load participant types';
@@ -72,12 +75,12 @@ export const ParticipantTypeSelector: React.FC = () => {
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         {types.map((type) => (
           <button
-            key={type.id_PT}
-            onClick={() => handleTypeSelect(type.id_PT)}
+            key={type.id}
+            onClick={() => handleTypeSelect(type.id)}
             className="relative flex flex-col items-center p-6 bg-white rounded-lg shadow transition-all duration-200 hover:shadow-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
           >
             <div className="flex items-center justify-center w-12 h-12 bg-blue-100 rounded-full">
-              <Users className="w-6 h-6 text-blue-600" />
+              <UsersIcon className="w-6 h-6 text-blue-600" />
             </div>
             <h3 className="mt-4 text-lg font-medium text-gray-900">{type.name}</h3>
             <p className="mt-1 text-sm text-gray-500">

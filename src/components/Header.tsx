@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Home, Users, Settings } from 'lucide-react';
+import { HomeIcon, UsersIcon, SettingsIcon } from '../utils/icons';
 
 export const Header: React.FC = () => {
   return (
@@ -11,15 +11,15 @@ export const Header: React.FC = () => {
             <Link to="/" className="text-xl font-bold">PLM System</Link>
             <div className="flex space-x-4">
               <Link to="/" className="flex items-center space-x-1 hover:text-blue-400">
-                <Home size={20} />
+                <HomeIcon size={20} />
                 <span>Home</span>
               </Link>
               <Link to="/participants" className="flex items-center space-x-1 hover:text-blue-400">
-                <Users size={20} />
+                <UsersIcon size={20} />
                 <span>Participants</span>
               </Link>
               <Link to="/categories" className="flex items-center space-x-1 hover:text-blue-400">
-                <Settings size={20} />
+                <SettingsIcon size={20} />
                 <span>Categories</span>
               </Link>
             </div>

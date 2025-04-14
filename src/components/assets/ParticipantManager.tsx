@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, Settings, Wrench } from 'lucide-react';
+import { UsersIcon, SettingsIcon, ToolsIcon } from '../../utils/icons';
 import { ParticipantTypeManager } from './ParticipantTypeManager';
 
 type ParticipantTab = 'types' | 'devices' | 'programs' | 'operators';
@@ -20,7 +20,7 @@ export const ParticipantManager: React.FC = () => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
           >
-            <Settings className="h-5 w-5 mr-2" />
+            <SettingsIcon className="h-5 w-5 mr-2" />
             Participant Types
           </button>
           <button
@@ -31,7 +31,7 @@ export const ParticipantManager: React.FC = () => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
           >
-            <Wrench className="h-5 w-5 mr-2" />
+            <ToolsIcon className="h-5 w-5 mr-2" />
             Devices
           </button>
           <button
@@ -42,7 +42,7 @@ export const ParticipantManager: React.FC = () => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
           >
-            <Settings className="h-5 w-5 mr-2" />
+            <SettingsIcon className="h-5 w-5 mr-2" />
             Programs
           </button>
           <button
@@ -53,7 +53,7 @@ export const ParticipantManager: React.FC = () => {
                 : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
             } whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm flex items-center`}
           >
-            <Users className="h-5 w-5 mr-2" />
+            <UsersIcon className="h-5 w-5 mr-2" />
             Operators
           </button>
         </nav>

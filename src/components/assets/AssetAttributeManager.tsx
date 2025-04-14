@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { VariableAttribute, Asset } from '../../types';
-import { Plus, Edit2, Trash2, X } from 'lucide-react';
+import { Plus, EditIcon, DeleteIcon, CloseIcon } from '../../utils/icons';
 import toast from 'react-hot-toast';
 
 const API_BASE_URL = 'http://localhost:3000/api';
@@ -235,13 +235,13 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
                           onClick={() => setEditingAttribute(attr)}
                           className="text-blue-600 hover:text-blue-800"
                         >
-                          <Edit2 className="w-4 h-4" />
+                          <EditIcon className="w-4 h-4" />
                         </button>
                         <button
                           onClick={() => handleDeleteAttribute(attr.id)}
                           className="text-red-600 hover:text-red-800"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          <DeleteIcon className="w-4 h-4" />
                         </button>
                       </div>
                     )}
@@ -263,7 +263,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
                 onClick={() => setIsAddModalOpen(false)}
                 className="text-gray-500 hover:text-gray-700"
               >
-                <X className="w-5 h-5" />
+                <CloseIcon className="w-5 h-5" />
               </button>
             </div>
             <div className="space-y-4">
@@ -341,7 +341,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
                 onClick={() => setEditingAttribute(null)}
                 className="text-gray-500 hover:text-gray-700"
               >
-                <X className="w-5 h-5" />
+                <CloseIcon className="w-5 h-5" />
               </button>
             </div>
             <div className="space-y-4">
