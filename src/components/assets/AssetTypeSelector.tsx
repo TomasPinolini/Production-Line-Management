@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import type { ParticipantType, ApiResponse } from '../../types';
+import type { AssetType, ApiResponse } from '../../types';
 import { UsersIcon } from '../../utils/icons';
 import toast from 'react-hot-toast';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
-export const ParticipantTypeSelector: React.FC = () => {
-  const [types, setTypes] = useState<ParticipantType[]>([]);
+export const AssetTypeSelector: React.FC = () => {
+  const [types, setTypes] = useState<AssetType[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -19,22 +19,26 @@ export const ParticipantTypeSelector: React.FC = () => {
   const fetchTypes = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/participant-types`);
-      if (!response.ok) throw new Error('Failed to fetch participant types');
-      const data: ApiResponse<ParticipantType[]> = await response.json();
+      const response = await fetch(`${API_BASE_URL}/asset-types`);
+      if (!response.ok) throw new Error('Failed to fetch asset types');
+      const data: ApiResponse<AssetType[]> = await response.json();
+      
+      if (!data.data) {
+        throw new Error('No data received');
+      }
       
       // Transform the data to ensure consistent ID handling
-      const transformedData: ParticipantType[] = data.data.map((type: ParticipantType) => ({
+      const transformedData: AssetType[] = data.data.map((type: AssetType) => ({
         ...type,
-        id: type.id_PT || type.id, // Handle both id and id_PT
+        id: type.id || 0,
         attributes: type.attributes || []
       }));
       
       setTypes(transformedData);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to load participant types';
+      const message = err instanceof Error ? err.message : 'Failed to load asset types';
       setError(message);
-      console.error('Error fetching participant types:', err);
+      console.error('Error fetching asset types:', err);
       toast.error(message);
     } finally {
       setLoading(false);
@@ -42,13 +46,13 @@ export const ParticipantTypeSelector: React.FC = () => {
   };
 
   const handleTypeSelect = (typeId: number) => {
-    navigate(`/participants/${typeId}`);
+    navigate(`/assets/${typeId}`);
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-gray-600">Loading participant types...</div>
+        <div className="text-gray-600">Loading asset types...</div>
       </div>
     );
   }
@@ -65,10 +69,10 @@ export const ParticipantTypeSelector: React.FC = () => {
     <div className="space-y-6">
       <div className="border-b border-gray-200 pb-5">
         <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
-          Select Participant Type
+          Select Asset Type
         </h2>
         <p className="mt-2 text-sm text-gray-500">
-          Choose a participant type to view and manage its participants
+          Choose an asset type to view and manage its assets
         </p>
       </div>
 
@@ -84,7 +88,7 @@ export const ParticipantTypeSelector: React.FC = () => {
             </div>
             <h3 className="mt-4 text-lg font-medium text-gray-900">{type.name}</h3>
             <p className="mt-1 text-sm text-gray-500">
-              View and manage {type.name.toLowerCase()} participants
+              View and manage {type.name.toLowerCase()} assets
             </p>
             <div className="absolute top-0 right-0 p-4">
               <div className="flex items-center justify-center w-8 h-8 bg-blue-50 rounded-full">
@@ -96,4 +100,6 @@ export const ParticipantTypeSelector: React.FC = () => {
       </div>
     </div>
   );
-}; 
+};
+
+export default AssetTypeSelector; 

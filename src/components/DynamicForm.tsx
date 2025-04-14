@@ -65,7 +65,7 @@ export function DynamicForm({ participantTypeId, attributes, onSubmit, title }: 
               value={formData.attributes[attr.id] || ''}
               onChange={(e) => {
                 const newValue = e.target.value;
-                const isValid = validateField(newValue, attr.formatData);
+                const isValid = validateField(newValue, attr.format_data || '');
                 setFormData({
                   ...formData,
                   attributes: {

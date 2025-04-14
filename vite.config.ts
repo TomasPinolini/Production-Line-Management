@@ -6,18 +6,32 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
-    },
+    alias: [
+      {
+        find: '@',
+        replacement: path.resolve(__dirname, 'src')
+      }
+    ]
   },
   optimizeDeps: {
     exclude: ['lucide-react'],
-    include: ['@/types'],
   },
   server: {
     port: 5173,
-    strictPort: true,
+    strictPort: false,
     host: true,
+    fs: {
+      strict: false,
+      allow: [path.resolve(__dirname, '.')]
+    }
   },
-  base: '/',
+  base: './',
+  build: {
+    sourcemap: true,
+    rollupOptions: {
+      input: {
+        main: path.resolve(__dirname, 'index.html')
+      }
+    }
+  }
 });

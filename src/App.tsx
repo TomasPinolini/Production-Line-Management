@@ -1,6 +1,5 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { AssetList } from './components/assets/AssetList';
 import Home from './components/Home';
 import Navigation from './components/Navigation';
 import { Toaster } from 'react-hot-toast';
@@ -13,7 +12,6 @@ function App() {
         <div className="container mx-auto px-4 py-8">
           <Routes>
             <Route path="/" element={<Home />} />
-            <Route path="/assets" element={<AssetList />} />
           </Routes>
         </div>
         <Toaster position="bottom-right" />

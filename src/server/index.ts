@@ -10,7 +10,7 @@ app.use(cors());
 app.use(express.json());
 
 // Test route
-app.get('/', (req, res) => {
+app.get('/', (_req, res) => {
   res.json({ message: 'Production Line Management API is running' });
 });
 
@@ -18,7 +18,7 @@ app.get('/', (req, res) => {
 app.use('/api/assets', assetsRouter);
 
 // Error handling middleware
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error(err.stack);
   res.status(500).json({ error: 'Something went wrong!' });
 });

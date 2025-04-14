@@ -1,47 +1,16 @@
 import React, { useState } from 'react';
-import { Asset, VariableAttribute } from '../../types';
 
 interface AssetFormProps {
-  asset?: {
-    id?: number;
-    name: string;
-    type?: string;
-    attributeValues: Record<string, string>;
-  };
-  attributes: VariableAttribute[];
-  onSubmit: (data: { name: string; type: string; attributes: { id: number; value: string; }[] }) => void;
+  onSubmit: (data: { name: string }) => void;
   onCancel: () => void;
 }
 
-const AssetForm: React.FC<AssetFormProps> = ({
-  asset,
-  attributes,
-  onSubmit,
-  onCancel,
-}) => {
-  const [name, setName] = useState(asset?.name || '');
-  const [type, setType] = useState(asset?.type || '');
-  const [attributeValues, setAttributeValues] = useState<Record<string, string>>(
-    asset?.attributeValues || {}
-  );
+const AssetForm: React.FC<AssetFormProps> = ({ onSubmit, onCancel }) => {
+  const [name, setName] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSubmit({
-      name,
-      type,
-      attributes: attributes.map(attr => ({
-        id: attr.id,
-        value: attributeValues[attr.id.toString()] || ''
-      }))
-    });
-  };
-
-  const handleAttributeChange = (attributeId: number, value: string) => {
-    setAttributeValues(prev => ({
-      ...prev,
-      [attributeId]: value
-    }));
+    onSubmit({ name });
   };
 
   return (
@@ -60,42 +29,6 @@ const AssetForm: React.FC<AssetFormProps> = ({
         />
       </div>
 
-      <div>
-        <label htmlFor="type" className="block text-sm font-medium text-gray-700">
-          Type
-        </label>
-        <input
-          type="text"
-          id="type"
-          value={type}
-          onChange={(e) => setType(e.target.value)}
-          className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-          required
-        />
-      </div>
-
-      {attributes.map((attr) => (
-        <div key={attr.id}>
-          <label
-            htmlFor={`attr-${attr.id}`}
-            className="block text-sm font-medium text-gray-700"
-          >
-            {attr.name}
-            {attr.description && (
-              <span className="ml-1 text-gray-500">({attr.description})</span>
-            )}
-          </label>
-          <input
-            type="text"
-            id={`attr-${attr.id}`}
-            value={attributeValues[attr.id.toString()] || ''}
-            onChange={(e) => handleAttributeChange(attr.id, e.target.value)}
-            pattern={attr.format_data}
-            className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-          />
-        </div>
-      ))}
-
       <div className="flex justify-end space-x-3">
         <button
           type="button"
@@ -108,7 +41,7 @@ const AssetForm: React.FC<AssetFormProps> = ({
           type="submit"
           className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
         >
-          {asset ? 'Update' : 'Create'} Asset
+          Create Asset
         </button>
       </div>
     </form>

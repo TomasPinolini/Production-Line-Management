@@ -12,7 +12,15 @@ const Home: React.FC = () => {
           Track and manage all assets and resources in your production process efficiently.
         </p>
       </div>
-      <AssetList />
+      <div className="bg-white rounded-lg shadow p-6">
+        <h2 className="text-2xl font-semibold text-gray-900 mb-6">
+          Asset Management
+        </h2>
+        <p className="text-gray-600 mb-6">
+          Manage your production assets, their attributes, and hierarchical relationships.
+        </p>
+        <AssetList />
+      </div>
     </div>
   );
 };

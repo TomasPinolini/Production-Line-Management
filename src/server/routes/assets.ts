@@ -1,13 +1,12 @@
 import { Router, Request, Response } from 'express';
-import pool from '../db';
-import { RowDataPacket, ResultSetHeader } from 'mysql2';
-import asyncHandler from 'express-async-handler';
-import type { Participant, VariableAttribute } from '../../types';
+import asyncHandler from '../utils/asyncHandler';
+import pool from '../db.js';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 
 const router = Router();
 
 // Get all root assets (those with null parent)
-router.get('/roots', asyncHandler(async (req: Request, res: Response) => {
+router.get('/roots', asyncHandler(async (_req: Request, res: Response) => {
   const [rootAssets] = await pool.query<RowDataPacket[]>(
     'SELECT * FROM asset WHERE id_parent IS NULL ORDER BY name ASC'
   );
@@ -63,7 +62,7 @@ router.get('/roots', asyncHandler(async (req: Request, res: Response) => {
 }));
 
 // Get all assets
-router.get('/', asyncHandler(async (req: Request, res: Response) => {
+router.get('/', asyncHandler(async (_req: Request, res: Response) => {
   const [assets] = await pool.query<RowDataPacket[]>(
     'SELECT * FROM asset'
   );
