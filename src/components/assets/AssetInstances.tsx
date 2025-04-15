@@ -14,8 +14,8 @@ interface AssetInstance extends Omit<Asset, 'attributes'> {
   attributes: AssetAttribute[];
 }
 
-interface CategoryLevel {
-  categoryId: number | null;
+interface AssetLevel {
+  assetId: number | null;
   options: Array<{
     id: number;
     name: string;
@@ -28,7 +28,7 @@ const API_BASE_URL = 'http://localhost:3000/api';
 
 export const AssetInstances: React.FC = () => {
   const [instances, setInstances] = useState<AssetInstance[]>([]);
-  const [categoryLevels, setCategoryLevels] = useState<CategoryLevel[]>([{ categoryId: null, options: [] }]);
+  const [assetLevels, setAssetLevels] = useState<AssetLevel[]>([{ assetId: null, options: [] }]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
@@ -40,88 +40,93 @@ export const AssetInstances: React.FC = () => {
     attributeValues: {} as Record<number, string>
   });
 
-  // Get the currently selected category
-  const selectedCategory = categoryLevels.length > 0 
-    ? categoryLevels[categoryLevels.length - 1].options.find(
-        cat => cat.id === categoryLevels[categoryLevels.length - 1].categoryId
+  // Get the currently selected asset
+  const selectedAsset = assetLevels.length > 0 
+    ? assetLevels[assetLevels.length - 1].options.find(
+        asset => asset.id === assetLevels[assetLevels.length - 1].assetId
       )
     : null;
 
   useEffect(() => {
-    fetchRootCategories();
+    const fetchAssets = async () => {
+      try {
+        const response = await fetch(`${API_BASE_URL}/assets/roots`);
+        if (!response.ok) {
+          throw new Error('Failed to fetch assets');
+        }
+        const data = await response.json();
+        setAssetLevels([{ assetId: null, options: data }]);
+      } catch (error) {
+        console.error('Error fetching assets:', error);
+        toast.error('Failed to load assets');
+      }
+    };
+
+    fetchAssets();
   }, []);
 
   useEffect(() => {
-    if (selectedCategory) {
-      fetchInstances(selectedCategory.id);
+    if (selectedAsset) {
+      fetchInstances(selectedAsset.id);
     }
-  }, [selectedCategory]);
+  }, [selectedAsset]);
 
   useEffect(() => {
     fetchAvailableAssets();
   }, []);
 
-  const fetchRootCategories = async () => {
+  const fetchChildAssets = async (parentId: number) => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/assets/categories/roots`);
-      if (!response.ok) throw new Error('Failed to load root categories');
-      const data = await response.json();
-      setCategoryLevels([{ categoryId: null, options: data }]);
-      setError(null);
-    } catch (err) {
-      console.error('Error fetching root categories:', err);
-      setError('Failed to load categories');
-      toast.error('Failed to load categories');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchChildCategories = async (parentId: number) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/assets/categories/${parentId}/children`);
-      if (!response.ok) throw new Error('Failed to load child categories');
+      const response = await fetch(`${API_BASE_URL}/assets/${parentId}/children`);
+      if (!response.ok) throw new Error('Failed to load child assets');
       const data = await response.json();
       return data;
     } catch (err) {
-      console.error('Error fetching child categories:', err);
-      toast.error('Failed to load child categories');
+      console.error('Error fetching child assets:', err);
+      toast.error('Failed to load child assets');
       return [];
     } finally {
       setLoading(false);
     }
   };
 
-  const handleCategoryChange = async (levelIndex: number, categoryId: number | null) => {
+  const handleAssetChange = async (levelIndex: number, assetId: number | null) => {
+    if (assetId === null) {
+      // If clearing a selection, remove all levels after this one
+      setAssetLevels(prev => prev.slice(0, levelIndex + 1));
+      return;
+    }
+
     try {
-      const updatedLevels = [...categoryLevels.slice(0, levelIndex + 1)];
-      updatedLevels[levelIndex] = {
-        ...updatedLevels[levelIndex],
-        categoryId
-      };
-
-      if (categoryId !== null) {
-        const selectedCat = categoryLevels[levelIndex].options.find(cat => cat.id === categoryId);
-        if (selectedCat?.hasChildren) {
-          const childCategories = await fetchChildCategories(categoryId);
-          console.log('Child categories with attributes:', childCategories);
-          updatedLevels.push({ categoryId: null, options: childCategories });
-        }
+      const response = await fetch(`${API_BASE_URL}/assets/${assetId}/children`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch child assets');
       }
+      const children = await response.json();
 
-      setCategoryLevels(updatedLevels);
-    } catch (err) {
-      console.error('Error handling category change:', err);
-      toast.error('Failed to load category data');
+      // Update the current level's selection
+      setAssetLevels(prev => {
+        const newLevels = [...prev];
+        newLevels[levelIndex] = { ...newLevels[levelIndex], assetId };
+        
+        // Add a new level if there are children
+        if (children.length > 0) {
+          newLevels[levelIndex + 1] = { assetId: null, options: children };
+        }
+        
+        return newLevels;
+      });
+    } catch (error) {
+      console.error('Error fetching child assets:', error);
+      toast.error('Failed to load child assets');
     }
   };
 
-  const fetchInstances = async (categoryId: number) => {
+  const fetchInstances = async (assetId: number) => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/assets/instances/${categoryId}`);
+      const response = await fetch(`${API_BASE_URL}/assets/instances/${assetId}`);
       if (!response.ok) throw new Error('Failed to load instances');
       const data = await response.json();
       console.log('Fetched instances data:', data);
@@ -135,9 +140,9 @@ export const AssetInstances: React.FC = () => {
     }
   };
 
-  const fetchAllAttributes = async (categoryId: number) => {
+  const fetchAllAttributes = async (assetId: number) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/assets/${categoryId}/all-attributes`);
+      const response = await fetch(`${API_BASE_URL}/assets/${assetId}/all-attributes`);
       if (!response.ok) throw new Error('Failed to load attributes');
       const data = await response.json();
       console.log('Fetched attributes data:', data);
@@ -184,10 +189,10 @@ export const AssetInstances: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedCategory) return;
+    if (!selectedAsset) return;
 
     // Validate all attributes
-    const invalidAttributes = selectedCategory.attributes.filter(attr => {
+    const invalidAttributes = selectedAsset.attributes.filter(attr => {
       const value = formData.attributeValues[attr.id] || '';
       return !attr.is_reference && attr.format_data && !validateAttributeValue(value, attr.format_data);
     });
@@ -198,7 +203,7 @@ export const AssetInstances: React.FC = () => {
     }
 
     try {
-      const attributeValues = selectedCategory.attributes.map(attr => {
+      const attributeValues = selectedAsset.attributes.map(attr => {
         const value = formData.attributeValues[attr.id] || '';
         return {
           attribute_id: attr.id,
@@ -216,7 +221,7 @@ export const AssetInstances: React.FC = () => {
         },
         body: JSON.stringify({
           name: formData.name,
-          id_parent: selectedCategory.id,
+          id_parent: selectedAsset.id,
           attributeValues
         }),
       });
@@ -229,7 +234,7 @@ export const AssetInstances: React.FC = () => {
       toast.success('Instance created successfully');
       setIsAddModalOpen(false);
       setFormData({ name: '', attributeValues: {} });
-      fetchInstances(selectedCategory.id);
+      fetchInstances(selectedAsset.id);
     } catch (err) {
       console.error('Error creating instance:', err);
       toast.error(err instanceof Error ? err.message : 'Failed to create instance');
@@ -273,7 +278,7 @@ export const AssetInstances: React.FC = () => {
     const value = formData.attributeValues[attribute.id] || '';
     const isValid = !attribute.format_data || validateAttributeValue(value, attribute.format_data);
 
-    // For reference attributes, get all assets under the referenced parent category
+    // For reference attributes, get all assets under the referenced parent asset
     const relevantAssets = attribute.is_reference && attribute.asset_id
       ? getAssetsUnderParent(attribute.asset_id)
       : [];
@@ -373,12 +378,12 @@ export const AssetInstances: React.FC = () => {
   }
 
   // Group attributes by source for display
-  const getAttributesBySource = (category: { 
+  const getAttributesBySource = (asset: { 
     name: string;
     attributes: Array<VariableAttribute & { source_asset?: string; is_inherited?: boolean }> 
   }) => {
-    return category.attributes.reduce((groups, attr) => {
-      const source = attr.is_inherited ? attr.source_asset || 'Unknown' : category.name;
+    return asset.attributes.reduce((groups, attr) => {
+      const source = attr.is_inherited ? attr.source_asset || 'Unknown' : asset.name;
       if (!groups[source]) {
         groups[source] = [];
       }
@@ -390,17 +395,17 @@ export const AssetInstances: React.FC = () => {
   return (
     <div className="container mx-auto px-4 py-8">
       <div className="mb-8 space-y-4">
-        {categoryLevels.map((level, index) => (
+        {assetLevels.map((level, index) => (
           <div key={index} className="flex items-center space-x-2">
             <select
-              value={level.categoryId || ''}
-              onChange={(e) => handleCategoryChange(index, e.target.value ? parseInt(e.target.value) : null)}
+              value={level.assetId || ''}
+              onChange={(e) => handleAssetChange(index, e.target.value ? parseInt(e.target.value) : null)}
               className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
             >
-              <option value="">Select {index === 0 ? 'Category' : 'Subcategory'}</option>
-              {level.options.map(cat => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
+              <option value="">Select {index === 0 ? 'Asset' : 'Subasset'}</option>
+              {level.options.map(asset => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.name}
                 </option>
               ))}
             </select>
@@ -408,11 +413,11 @@ export const AssetInstances: React.FC = () => {
         ))}
       </div>
 
-      {selectedCategory && (
+      {selectedAsset && (
         <>
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold">
-              Instances of {selectedCategory.name}
+              Instances of {selectedAsset.name}
             </h2>
             <button
               onClick={() => setIsAddModalOpen(true)}
@@ -480,11 +485,11 @@ export const AssetInstances: React.FC = () => {
         </>
       )}
 
-      {isAddModalOpen && selectedCategory && (
+      {isAddModalOpen && selectedAsset && (
         <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center">
           <div className="bg-white rounded-lg p-6 max-w-2xl w-full mx-4">
             <h3 className="text-lg font-medium text-gray-900 mb-4">
-              Add New {selectedCategory.name} Instance
+              Add New {selectedAsset.name} Instance
             </h3>
             <form onSubmit={handleSubmit}>
               <div className="mb-4">
@@ -501,10 +506,10 @@ export const AssetInstances: React.FC = () => {
               </div>
 
               {/* Group attributes by source */}
-              {Object.entries(getAttributesBySource(selectedCategory)).map(([source, attributes]) => (
+              {Object.entries(getAttributesBySource(selectedAsset)).map(([source, attributes]) => (
                 <div key={source} className="mb-6">
                   <h4 className="text-sm font-medium text-gray-700 mb-2">
-                    {source === selectedCategory.name ? 'Instance Attributes' : `Attributes from ${source}`}
+                    {source === selectedAsset.name ? 'Instance Attributes' : `Attributes from ${source}`}
                   </h4>
                   {attributes.map(attr => renderAttributeInput(attr))}
                 </div>

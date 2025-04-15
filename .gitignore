@@ -29,7 +29,3 @@ dist-ssr
 .env.development.local
 .env.test.local
 .env.production.local
-
-# Database
-*.sql
-!src/server/sql/create_tables.sql

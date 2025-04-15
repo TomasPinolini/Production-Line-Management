@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { VariableAttribute, Asset } from '../../types';
 import { Plus, EditIcon, DeleteIcon, CloseIcon } from '../../utils/icons';
 import toast from 'react-hot-toast';
+import AssetAttributeInheritance from './AssetAttributeInheritance';
 
 const API_BASE_URL = 'http://localhost:3000/api';
 
@@ -30,14 +31,14 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
   const [loading, setLoading] = useState(true);
 
   const [isSelectingReference, setIsSelectingReference] = useState(false);
-  const [categoryLevels, setCategoryLevels] = useState<Array<{
-    categoryId: number | null;
+  const [assetLevels, setAssetLevels] = useState<Array<{
+    assetId: number | null;
     options: Array<{
       id: number;
       name: string;
       hasChildren: boolean;
     }>;
-  }>>([{ categoryId: null, options: [] }]);
+  }>>([{ assetId: null, options: [] }]);
 
   useEffect(() => {
     if (assetId) {
@@ -47,7 +48,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
 
   useEffect(() => {
     if (isSelectingReference) {
-      fetchRootCategories();
+      fetchRootAssets();
     }
   }, [isSelectingReference]);
 
@@ -112,50 +113,50 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
     }
   };
 
-  const fetchRootCategories = async () => {
+  const fetchRootAssets = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/assets/categories/roots`);
-      if (!response.ok) throw new Error('Failed to load root categories');
+      const response = await fetch(`${API_BASE_URL}/assets/roots`);
+      if (!response.ok) throw new Error('Failed to load root assets');
       const data = await response.json();
-      setCategoryLevels([{ categoryId: null, options: data }]);
+      setAssetLevels([{ assetId: null, options: data }]);
     } catch (err) {
-      console.error('Error fetching root categories:', err);
-      toast.error('Failed to load categories');
+      console.error('Error fetching root assets:', err);
+      toast.error('Failed to load assets');
     }
   };
 
-  const fetchChildCategories = async (parentId: number) => {
+  const fetchChildAssets = async (parentId: number) => {
     try {
-      const response = await fetch(`${API_BASE_URL}/assets/categories/${parentId}/children`);
-      if (!response.ok) throw new Error('Failed to load child categories');
+      const response = await fetch(`${API_BASE_URL}/assets/${parentId}/children`);
+      if (!response.ok) throw new Error('Failed to load child assets');
       return await response.json();
     } catch (err) {
-      console.error('Error fetching child categories:', err);
-      toast.error('Failed to load child categories');
+      console.error('Error fetching child assets:', err);
+      toast.error('Failed to load child assets');
       return [];
     }
   };
 
-  const handleCategoryChange = async (levelIndex: number, categoryId: number | null) => {
+  const handleCategoryChange = async (levelIndex: number, assetId: number | null) => {
     try {
-      const updatedLevels = [...categoryLevels.slice(0, levelIndex + 1)];
+      const updatedLevels = [...assetLevels.slice(0, levelIndex + 1)];
       updatedLevels[levelIndex] = {
         ...updatedLevels[levelIndex],
-        categoryId
+        assetId
       };
 
-      if (categoryId !== null) {
-        const selectedCat = categoryLevels[levelIndex].options.find(cat => cat.id === categoryId);
-        if (selectedCat?.hasChildren) {
-          const childCategories = await fetchChildCategories(categoryId);
-          updatedLevels.push({ categoryId: null, options: childCategories });
+      if (assetId !== null) {
+        const selectedAsset = assetLevels[levelIndex].options.find(asset => asset.id === assetId);
+        if (selectedAsset?.hasChildren) {
+          const childAssets = await fetchChildAssets(assetId);
+          updatedLevels.push({ assetId: null, options: childAssets });
         }
       }
 
-      setCategoryLevels(updatedLevels);
+      setAssetLevels(updatedLevels);
     } catch (err) {
-      console.error('Error handling category change:', err);
-      toast.error('Failed to load category data');
+      console.error('Error handling asset change:', err);
+      toast.error('Failed to load asset data');
     }
   };
 
@@ -163,11 +164,11 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
     e.preventDefault();
     if (!assetId) return;
 
-    // Get the selected category from any level
-    const selectedCategory = categoryLevels.reduce<{ id: number; name: string; hasChildren: boolean } | null>((selected, level) => {
-      if (level.categoryId !== null) {
-        const category = level.options.find(cat => cat.id === level.categoryId);
-        if (category) return category;
+    // Get the selected asset from any level
+    const selectedAsset = assetLevels.reduce<{ id: number; name: string; hasChildren: boolean } | null>((selected, level) => {
+      if (level.assetId !== null) {
+        const asset = level.options.find(asset => asset.id === level.assetId);
+        if (asset) return asset;
       }
       return selected;
     }, null);
@@ -182,7 +183,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
           name: newAttribute.name,
           description: newAttribute.description,
           format_data: newAttribute.is_reference 
-            ? `ref:${selectedCategory?.id || ''}` // Store reference type in format_data
+            ? `ref:${selectedAsset?.id || ''}` // Store reference type in format_data
             : newAttribute.format_data
         }),
       });
@@ -201,7 +202,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
         is_reference: false
       });
       setIsSelectingReference(false);
-      setCategoryLevels([{ categoryId: null, options: [] }]);
+      setAssetLevels([{ assetId: null, options: [] }]);
       loadAttributes();
     } catch (err) {
       console.error('Error adding attribute:', err);
@@ -278,65 +279,100 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
     }
   };
 
+  const selectedAssetId = assetLevels.find(level => level.assetId !== null)?.assetId;
+
   return (
-    <div className="space-y-6">
-      <div className="flex justify-between items-center">
-        <h3 className="text-lg font-medium">Asset Attributes</h3>
-        <button
-          onClick={() => setIsAddModalOpen(true)}
-          className="flex items-center px-3 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Add Attribute
-        </button>
+    <div className="container mx-auto p-4">
+      <h2 className="text-2xl font-bold mb-4">Asset Attribute Management</h2>
+      
+      {/* Asset Selection */}
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold mb-2">Select Asset</h3>
+        <div className="flex space-x-4">
+          {assetLevels.map((level, index) => (
+            <div key={index} className="flex-1">
+              <select
+                className="w-full p-2 border rounded"
+                value={level.assetId || ''}
+                onChange={(e) => handleCategoryChange(index, e.target.value ? parseInt(e.target.value) : null)}
+              >
+                <option value="">Select Asset</option>
+                {level.options.map((asset) => (
+                  <option key={asset.id} value={asset.id}>
+                    {asset.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ))}
+        </div>
       </div>
 
-      {attributeGroups.map(group => (
-        <div key={group.assetId} className="space-y-4 mb-6">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-medium text-gray-500">
-              {group.assetName}
-            </h4>
-          </div>
-          <div className="bg-white shadow overflow-hidden sm:rounded-md">
-            <ul className="divide-y divide-gray-200">
-              {group.attributes.map(attr => (
-                <li key={attr.id} className="px-4 py-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h5 className="text-sm font-medium">{attr.name}</h5>
-                      {attr.description && (
-                        <p className="text-sm text-gray-500">{attr.description}</p>
-                      )}
-                      {attr.format_data && (
-                        <p className="text-xs text-gray-400">
-                          Format: {attr.format_data}
-                        </p>
-                      )}
-                    </div>
-                    {group.assetId === assetId && (
+      {/* Show inheritance section if an asset is selected */}
+      {selectedAssetId && (
+        <div className="mb-6">
+          <AssetAttributeInheritance 
+            assetId={selectedAssetId}
+            onInheritanceChange={loadAttributes}
+          />
+        </div>
+      )}
+
+      {/* Attribute Management */}
+      <div className="mb-6">
+        <h3 className="text-lg font-semibold mb-2">Attributes</h3>
+        <div className="flex justify-between items-center mb-4">
+          <h4 className="text-sm font-medium text-gray-500">
+            {assetLevels.find(level => level.assetId !== null)?.options.find(opt => opt.id === selectedAssetId)?.name || 'No asset selected'}
+          </h4>
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600"
+          >
+            Add Attribute
+          </button>
+        </div>
+
+        {attributeGroups.map((group) => (
+          <div key={group.assetId} className="space-y-4 mb-6">
+            <div className="flex items-center justify-between">
+              <h5 className="text-sm font-medium text-gray-500">
+                {group.assetName}
+              </h5>
+            </div>
+            <div className="bg-white shadow overflow-hidden sm:rounded-md">
+              <ul className="divide-y divide-gray-200">
+                {group.attributes.map((attr) => (
+                  <li key={attr.id} className="px-4 py-4">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h6 className="text-sm font-medium">{attr.name}</h6>
+                        {attr.description && (
+                          <p className="text-sm text-gray-500">{attr.description}</p>
+                        )}
+                      </div>
                       <div className="flex space-x-2">
                         <button
                           onClick={() => setEditingAttribute(attr)}
-                          className="text-blue-600 hover:text-blue-800"
+                          className="text-blue-500 hover:text-blue-700"
                         >
-                          <EditIcon className="w-4 h-4" />
+                          Edit
                         </button>
                         <button
                           onClick={() => handleDeleteAttribute(attr.id)}
-                          className="text-red-600 hover:text-red-800"
+                          className="text-red-500 hover:text-red-700"
                         >
-                          <DeleteIcon className="w-4 h-4" />
+                          Delete
                         </button>
                       </div>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
-        </div>
-      ))}
+        ))}
+      </div>
 
       {/* Add Attribute Modal */}
       {isAddModalOpen && (
@@ -383,7 +419,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
                           setNewAttribute(prev => ({ ...prev, is_reference: e.target.checked }));
                           setIsSelectingReference(e.target.checked);
                           if (!e.target.checked) {
-                            setCategoryLevels([{ categoryId: null, options: [] }]);
+                            setAssetLevels([{ assetId: null, options: [] }]);
                           }
                         }}
                         className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
@@ -395,19 +431,19 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
 
                 {newAttribute.is_reference ? (
                   <div className="space-y-4">
-                    <h4 className="text-sm font-medium text-gray-700">Select Asset Type to Reference</h4>
-                    <p className="text-sm text-gray-500">You can select an asset type from any level in the hierarchy.</p>
-                    {categoryLevels.map((level, index) => (
+                    <h4 className="text-sm font-medium text-gray-700">Select Asset to Reference</h4>
+                    <p className="text-sm text-gray-500">You can select an asset from any level in the hierarchy.</p>
+                    {assetLevels.map((level, index) => (
                       <div key={index} className="flex items-center space-x-2">
                         <select
-                          value={level.categoryId || ''}
+                          value={level.assetId || ''}
                           onChange={(e) => handleCategoryChange(index, e.target.value ? parseInt(e.target.value) : null)}
                           className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
                         >
-                          <option value="">Select {index === 0 ? 'Category' : 'Subcategory'}</option>
-                          {level.options.map(cat => (
-                            <option key={cat.id} value={cat.id}>
-                              {cat.name}
+                          <option value="">Select {index === 0 ? 'Asset' : 'Subasset'}</option>
+                          {level.options.map(asset => (
+                            <option key={asset.id} value={asset.id}>
+                              {asset.name}
                             </option>
                           ))}
                         </select>
@@ -435,7 +471,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
                   onClick={() => {
                     setIsAddModalOpen(false);
                     setIsSelectingReference(false);
-                    setCategoryLevels([{ categoryId: null, options: [] }]);
+                    setAssetLevels([{ assetId: null, options: [] }]);
                   }}
                   className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:text-sm"
                 >
@@ -443,7 +479,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
                 </button>
                 <button
                   type="submit"
-                  disabled={newAttribute.is_reference && !categoryLevels.some(level => level.categoryId !== null)}
+                  disabled={newAttribute.is_reference && !assetLevels.some(level => level.assetId !== null)}
                   className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 sm:text-sm"
                 >
                   Add Attribute

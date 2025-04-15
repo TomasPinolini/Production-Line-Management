@@ -5,6 +5,27 @@ import { ResultSetHeader, RowDataPacket } from 'mysql2';
 
 const router = Router();
 
+interface ParentAsset extends RowDataPacket {
+  id: number;
+}
+
+interface VariableAttribute extends RowDataPacket {
+  id: number;
+  asset_id: number;
+  name: string;
+  description: string | null;
+  format_data: string | null;
+  is_reference: boolean;
+  is_shared: boolean;
+  is_inherited: boolean;
+  inherited_from: number | null;
+  is_value_inherited: boolean;
+}
+
+interface AttributeValue extends RowDataPacket {
+  value: string;
+}
+
 // Get all assets
 router.get('/', asyncHandler(async (_req: Request, res: Response) => {
   const [assets] = await pool.query<RowDataPacket[]>(
@@ -13,15 +34,15 @@ router.get('/', asyncHandler(async (_req: Request, res: Response) => {
   res.json(assets);
 }));
 
-// Get all categories with their attributes
-router.get('/categories', asyncHandler(async (_req: Request, res: Response) => {
-  console.log('Categories endpoint called');
+// Get all assets with their attributes
+router.get('/assets', asyncHandler(async (_req: Request, res: Response) => {
+  console.log('Assets endpoint called');
   const connection = await pool.getConnection();
   try {
-    console.log('Getting categories from database');
-    // Get all categories (including those without attributes)
-    const [categories] = await connection.query<RowDataPacket[]>(
-      `WITH RECURSIVE category_hierarchy AS (
+    console.log('Getting assets from database');
+    // Get all assets (including those without attributes)
+    const [assets] = await connection.query<RowDataPacket[]>(
+      `WITH RECURSIVE asset_hierarchy AS (
         -- Get all root assets and assets with attributes
         SELECT 
           a.*,
@@ -33,35 +54,35 @@ router.get('/categories', asyncHandler(async (_req: Request, res: Response) => {
         
         UNION ALL
         
-        -- Get parents of categories (they become categories too)
+        -- Get parents of assets (they become assets too)
         SELECT 
           p.*,
-          CONCAT(p.id, ',', ch.path),
-          ch.level - 1
+          CONCAT(p.id, ',', ah.path),
+          ah.level - 1
         FROM asset p
-        INNER JOIN category_hierarchy ch ON ch.id_parent = p.id
+        INNER JOIN asset_hierarchy ah ON ah.id_parent = p.id
       )
-      SELECT DISTINCT * FROM category_hierarchy
+      SELECT DISTINCT * FROM asset_hierarchy
       ORDER BY path`
     );
 
-    console.log('Categories found:', categories);
+    console.log('Assets found:', assets);
 
-    if (!categories || categories.length === 0) {
-      console.log('No categories found, returning empty array');
+    if (!assets || assets.length === 0) {
+      console.log('No assets found, returning empty array');
       res.json([]);
       return;
     }
 
-    // For each category, get its attributes (if any) and build hierarchy
-    const categoriesWithDetails = await Promise.all(
-      categories.map(async (category) => {
-        // Get attributes for this category (if any)
+    // For each asset, get its attributes (if any) and build hierarchy
+    const assetsWithDetails = await Promise.all(
+      assets.map(async (asset) => {
+        // Get attributes for this asset (if any)
         const [attributes] = await connection.query<RowDataPacket[]>(
           `SELECT va.id, va.name, va.description, va.format_data
            FROM variable_attribute va
            WHERE va.asset_id = ?`,
-          [category.id]
+          [asset.id]
         );
 
         // Get direct children that are either root assets or have attributes
@@ -71,112 +92,177 @@ router.get('/categories', asyncHandler(async (_req: Request, res: Response) => {
            LEFT JOIN variable_attribute va ON va.asset_id = a.id
            WHERE a.id_parent = ?
            AND (va.id IS NOT NULL OR a.id_parent IS NULL)`,
-          [category.id]
+          [asset.id]
         );
 
         return {
-          ...category,
+          ...asset,
           attributes: attributes || [],
           children: children || [],
-          isCategory: true
+          isAsset: true
         };
       })
     );
 
     // Build the complete hierarchy tree
-    const buildCategoryTree = (categories: any[], parentId: number | null = null): any[] => {
-      return categories
-        .filter(c => c.id_parent === parentId)
-        .map(category => ({
-          ...category,
-          children: buildCategoryTree(categories, category.id)
+    const buildAssetTree = (assets: any[], parentId: number | null = null): any[] => {
+      return assets
+        .filter(a => a.id_parent === parentId)
+        .map(asset => ({
+          ...asset,
+          children: buildAssetTree(assets, asset.id)
         }));
     };
 
     // Return either flat list or tree based on query parameter
     const { tree } = _req.query;
     const result = tree === 'true' 
-      ? buildCategoryTree(categoriesWithDetails)
-      : categoriesWithDetails;
+      ? buildAssetTree(assetsWithDetails)
+      : assetsWithDetails;
 
-    console.log('Categories with details:', result);
     res.json(result);
   } catch (error) {
-    console.error('Error fetching categories:', error);
+    console.error('Error in assets endpoint:', error);
     res.status(500).json({ message: 'Internal server error' });
   } finally {
     connection.release();
   }
 }));
 
-// Get root assets with their children
+// Get all root assets
 router.get('/roots', asyncHandler(async (_req: Request, res: Response) => {
-  console.log('Roots endpoint called');
   const connection = await pool.getConnection();
   try {
-    console.log('Getting root assets from database');
     const [roots] = await connection.query<RowDataPacket[]>(
-      `SELECT * FROM asset WHERE id_parent IS NULL ORDER BY id`
+      `SELECT DISTINCT a.* 
+       FROM asset a
+       WHERE a.id_parent IS NULL
+       ORDER BY a.name`
     );
 
-    console.log('Root assets found:', roots);
-
     if (!roots || roots.length === 0) {
-      console.log('No root assets found, returning empty array');
       res.json([]);
       return;
     }
 
-    // For each root asset, fetch their complete hierarchy
-    const rootsWithHierarchy = await Promise.all(
-      roots.map(async (root) => {
-        // Get all descendants using recursive CTE
-        const [descendants] = await connection.query<RowDataPacket[]>(
-          `WITH RECURSIVE asset_hierarchy AS (
-            -- Base case: direct children of the current root
-            SELECT 
-              a.*,
-              1 as level,
-              CAST(a.id AS CHAR(200)) as path
-            FROM asset a
-            WHERE a.id_parent = ?
-            
-            UNION ALL
-            
-            -- Recursive case: children of children
-            SELECT 
-              a.*,
-              ah.level + 1,
-              CONCAT(ah.path, ',', a.id)
-            FROM asset a
-            INNER JOIN asset_hierarchy ah ON a.id_parent = ah.id
-          )
-          SELECT * FROM asset_hierarchy
-          ORDER BY path`,
-          [root.id]
+    // Get attributes for each root asset (if they exist)
+    const assetsWithAttributes = await Promise.all(
+      roots.map(async (asset) => {
+        // Check if asset has attributes
+        const [attributes] = await connection.query<RowDataPacket[]>(`
+          SELECT 
+            va.*,
+            a.name as source_asset,
+            false as is_inherited
+          FROM asset a
+          LEFT JOIN variable_attribute va ON va.asset_id = a.id
+          WHERE a.id = ?
+          ORDER BY va.name
+        `, [asset.id]);
+
+        // Check if this asset has children
+        const [hasChildren] = await connection.query<RowDataPacket[]>(
+          `SELECT COUNT(*) as count
+           FROM asset a
+           WHERE a.id_parent = ?`,
+          [asset.id]
         );
 
-        // Build the hierarchy tree
-        const buildHierarchy = (assets: RowDataPacket[], parentId: number | null = null): any[] => {
-          return assets
-            .filter(a => a.id_parent === parentId)
-            .map(a => ({
-              ...a,
-              children: buildHierarchy(assets, a.id)
-            }));
-        };
-
-        // Return root with its hierarchy
         return {
-          ...root,
-          children: buildHierarchy(descendants, root.id)
+          ...asset,
+          attributes: attributes.map(attr => ({
+            ...attr,
+            is_reference: Boolean(attr.is_reference)  // Ensure boolean type
+          })) || [],
+          hasChildren: hasChildren[0].count > 0
         };
       })
     );
 
-    res.json(rootsWithHierarchy);
+    res.json(assetsWithAttributes);
   } catch (error) {
     console.error('Error fetching root assets:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    connection.release();
+  }
+}));
+
+// Get child assets of a specific parent asset
+router.get('/:parentId/children', asyncHandler(async (req: Request, res: Response) => {
+  const { parentId } = req.params;
+  console.log(`Getting children of asset ${parentId}`);
+  
+  const connection = await pool.getConnection();
+  try {
+    const [childAssets] = await connection.query<RowDataPacket[]>(
+      `SELECT DISTINCT a.* 
+       FROM asset a
+       WHERE a.id_parent = ?
+       ORDER BY a.name`,
+      [parentId]
+    );
+
+    if (!childAssets || childAssets.length === 0) {
+      res.json([]);
+      return;
+    }
+
+    // Get attributes for each child asset (if they exist)
+    const assetsWithDetails = await Promise.all(
+      childAssets.map(async (asset) => {
+        // Get all attributes from this asset and its ancestors
+        const [attributes] = await connection.query<RowDataPacket[]>(`
+          WITH RECURSIVE asset_chain AS (
+            -- Start with the current asset
+            SELECT id, name, id_parent
+            FROM asset
+            WHERE id = ?
+            
+            UNION ALL
+            
+            -- Get all ancestors
+            SELECT p.id, p.name, p.id_parent
+            FROM asset p
+            JOIN asset_chain ac ON p.id = ac.id_parent
+          )
+          SELECT 
+            va.*,
+            a.name as source_asset,
+            CASE 
+              WHEN va.asset_id = ? THEN false 
+              ELSE true 
+            END as is_inherited
+          FROM asset_chain ac
+          JOIN asset a ON a.id = ac.id
+          JOIN variable_attribute va ON va.asset_id = ac.id
+          ORDER BY va.name`,
+          [asset.id, asset.id]
+        );
+
+        // Check if this asset has children that are also assets
+        const [hasChildren] = await connection.query<RowDataPacket[]>(
+          `SELECT COUNT(*) as count
+           FROM asset a
+           JOIN variable_attribute va ON va.asset_id = a.id
+           WHERE a.id_parent = ?`,
+          [asset.id]
+        );
+
+        return {
+          ...asset,
+          attributes: attributes.map(attr => ({
+            ...attr,
+            is_reference: Boolean(attr.is_reference)  // Ensure boolean type
+          })) || [],
+          hasChildren: hasChildren[0].count > 0
+        };
+      })
+    );
+
+    res.json(assetsWithDetails);
+  } catch (error) {
+    console.error('Error fetching child assets:', error);
     res.status(500).json({ message: 'Internal server error' });
   } finally {
     connection.release();
@@ -1433,6 +1519,232 @@ router.delete('/:assetId/attributes/:attributeId/references/:referencedAssetId',
     );
 
     res.json({ message: 'Reference removed successfully' });
+  } finally {
+    connection.release();
+  }
+}));
+
+// Get inherited attributes for an asset
+router.get('/:assetId/inherited-attributes', async (req, res) => {
+  const { assetId } = req.params;
+  
+  try {
+    // Get all parent assets up the hierarchy
+    const parentAssetsQuery = `
+      WITH RECURSIVE parent_hierarchy AS (
+        SELECT id, id_parent, 1 as level
+        FROM asset
+        WHERE id = ?
+        UNION ALL
+        SELECT a.id, a.id_parent, ph.level + 1
+        FROM asset a
+        JOIN parent_hierarchy ph ON a.id = ph.id_parent
+      )
+      SELECT id FROM parent_hierarchy
+      ORDER BY level DESC;
+    `;
+
+    const [parentAssets] = await pool.query<ParentAsset[]>(parentAssetsQuery, [assetId]);
+    
+    // Get all attributes from parent assets
+    const attributesQuery = `
+      SELECT va.*, a.name as asset_name
+      FROM variable_attribute va
+      JOIN asset a ON va.asset_id = a.id
+      WHERE va.asset_id IN (?)
+      AND (va.is_shared = TRUE OR va.is_inherited = TRUE)
+      ORDER BY 
+        CASE 
+          WHEN va.is_value_inherited = TRUE THEN 0
+          ELSE 1
+        END,
+        va.created_at DESC;
+    `;
+
+    const parentIds = parentAssets.map(p => p.id);
+    const [inheritedAttributes] = await pool.query<VariableAttribute[]>(attributesQuery, [parentIds]);
+
+    res.json(inheritedAttributes);
+  } catch (error) {
+    console.error('Error fetching inherited attributes:', error);
+    res.status(500).json({ error: 'Failed to fetch inherited attributes' });
+  }
+});
+
+// Set attribute inheritance
+router.post('/:assetId/attributes/:attributeId/inherit', async (req, res) => {
+  const { assetId, attributeId } = req.params;
+  const { inheritValue } = req.body;
+
+  try {
+    // Get the original attribute
+    const [originalAttribute] = await pool.query<VariableAttribute[]>(
+      'SELECT * FROM variable_attribute WHERE id = ?',
+      [attributeId]
+    );
+
+    if (originalAttribute.length === 0) {
+      return res.status(404).json({ error: 'Attribute not found' });
+    }
+
+    const attribute = originalAttribute[0];
+
+    // Create inherited attribute
+    const [result] = await pool.query<ResultSetHeader>(
+      `INSERT INTO variable_attribute 
+       (asset_id, name, description, format_data, is_reference, is_shared, is_inherited, inherited_from, is_value_inherited)
+       VALUES (?, ?, ?, ?, ?, ?, TRUE, ?, ?)`,
+      [
+        assetId,
+        attribute.name,
+        attribute.description,
+        attribute.format_data,
+        attribute.is_reference,
+        attribute.is_shared,
+        attribute.asset_id,
+        inheritValue
+      ]
+    );
+
+    // If inheriting value, copy the value from parent
+    if (inheritValue) {
+      const [parentValue] = await pool.query<AttributeValue[]>(
+        'SELECT value FROM attribute_value WHERE attribute_id = ? AND asset_id = ?',
+        [attributeId, attribute.asset_id]
+      );
+
+      if (parentValue.length > 0) {
+        await pool.query<ResultSetHeader>(
+          'INSERT INTO attribute_value (asset_id, attribute_id, value) VALUES (?, ?, ?)',
+          [assetId, result.insertId, parentValue[0].value]
+        );
+      }
+    }
+
+    res.json({ success: true, attributeId: result.insertId });
+  } catch (error) {
+    console.error('Error setting attribute inheritance:', error);
+    res.status(500).json({ error: 'Failed to set attribute inheritance' });
+  }
+});
+
+// Get complete asset hierarchy
+router.get('/hierarchy', asyncHandler(async (_req: Request, res: Response) => {
+  const connection = await pool.getConnection();
+  try {
+    console.log('Fetching asset hierarchy...');
+    
+    // First, get all assets with their hierarchy information
+    const [assets] = await connection.query<RowDataPacket[]>(
+      `WITH RECURSIVE asset_hierarchy AS (
+        -- Base case: get all root assets
+        SELECT 
+          a.*,
+          CAST(a.id AS CHAR(200)) as path,
+          0 as level
+        FROM asset a
+        WHERE a.id_parent IS NULL
+        
+        UNION ALL
+        
+        -- Recursive case: get all children
+        SELECT 
+          c.*,
+          CONCAT(ah.path, ',', c.id),
+          ah.level + 1
+        FROM asset c
+        INNER JOIN asset_hierarchy ah ON c.id_parent = ah.id
+      )
+      SELECT DISTINCT * FROM asset_hierarchy
+      ORDER BY path`
+    );
+
+    console.log('Found assets:', assets?.length || 0);
+
+    // Get attributes for all assets in one query
+    const [allAttributes] = await connection.query<RowDataPacket[]>(
+      `SELECT 
+        va.*,
+        a.name as source_asset,
+        av.value as current_value
+       FROM variable_attribute va
+       JOIN asset a ON va.asset_id = a.id
+       LEFT JOIN attribute_value av ON av.attribute_id = va.id AND av.asset_id = a.id`
+    );
+
+    console.log('Found attributes:', allAttributes?.length || 0);
+
+    // Create a map of attributes by asset_id
+    const attributesByAsset = allAttributes.reduce((acc: any, attr) => {
+      if (!acc[attr.asset_id]) {
+        acc[attr.asset_id] = [];
+      }
+      acc[attr.asset_id].push({
+        ...attr,
+        value: attr.current_value,
+        is_reference: Boolean(attr.is_reference)
+      });
+      return acc;
+    }, {});
+
+    // Build the tree structure
+    const buildTree = (items: any[], parentId: number | null = null): any[] => {
+      return items
+        .filter(item => {
+          const itemParentId = item.id_parent === 0 ? null : item.id_parent;
+          return itemParentId === parentId;
+        })
+        .map(item => ({
+          ...item,
+          attributes: attributesByAsset[item.id] || [],
+          children: buildTree(items, item.id),
+          isExpanded: false
+        }));
+    };
+
+    const hierarchy = buildTree(assets);
+    console.log('Built hierarchy with root nodes:', hierarchy?.length || 0);
+    
+    res.json(hierarchy);
+  } catch (error) {
+    console.error('Error fetching asset hierarchy:', error);
+    res.status(500).json({ message: 'Internal server error', details: error instanceof Error ? error.message : 'Unknown error' });
+  } finally {
+    connection.release();
+  }
+}));
+
+// Get all ancestors of an asset
+router.get('/:id/ancestors', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const connection = await pool.getConnection();
+  try {
+    const [ancestors] = await connection.query<RowDataPacket[]>(
+      `WITH RECURSIVE asset_ancestors AS (
+        SELECT 
+          a.*,
+          0 as level
+        FROM asset a
+        WHERE a.id = ?
+        
+        UNION ALL
+        
+        SELECT 
+          p.*,
+          aa.level + 1
+        FROM asset p
+        INNER JOIN asset_ancestors aa ON aa.id_parent = p.id
+      )
+      SELECT * FROM asset_ancestors
+      WHERE id != ?
+      ORDER BY level DESC`,
+      [id, id]
+    );
+
+    res.json(ancestors);
+  } catch (error) {
+    console.error('Error fetching asset ancestors:', error);
+    res.status(500).json({ message: 'Internal server error' });
   } finally {
     connection.release();
   }

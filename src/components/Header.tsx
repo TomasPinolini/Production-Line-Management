@@ -18,9 +18,11 @@ export const Header: React.FC = () => {
                 <UsersIcon size={20} />
                 <span>Participants</span>
               </Link>
-              <Link to="/categories" className="flex items-center space-x-1 hover:text-blue-400">
-                <SettingsIcon size={20} />
-                <span>Categories</span>
+              <Link
+                to="/assets"
+                className="text-gray-300 hover:bg-gray-700 hover:text-white px-3 py-2 rounded-md text-sm font-medium"
+              >
+                Assets
               </Link>
             </div>
           </div>
