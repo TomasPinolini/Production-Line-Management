@@ -19,16 +19,17 @@ router.get('/categories', asyncHandler(async (_req: Request, res: Response) => {
   const connection = await pool.getConnection();
   try {
     console.log('Getting categories from database');
-    // Get all categories (assets that have attributes defined)
+    // Get all categories (including those without attributes)
     const [categories] = await connection.query<RowDataPacket[]>(
       `WITH RECURSIVE category_hierarchy AS (
-        -- Get all assets that have attributes defined (these are our categories)
+        -- Get all root assets and assets with attributes
         SELECT 
           a.*,
           CAST(a.id AS CHAR(200)) as path,
           IF(a.id_parent IS NULL, 0, 1) as level
         FROM asset a
-        JOIN variable_attribute va ON va.asset_id = a.id
+        WHERE a.id_parent IS NULL  -- Include all root assets
+           OR EXISTS (SELECT 1 FROM variable_attribute va WHERE va.asset_id = a.id)  -- And assets with attributes
         
         UNION ALL
         
@@ -52,10 +53,10 @@ router.get('/categories', asyncHandler(async (_req: Request, res: Response) => {
       return;
     }
 
-    // For each category, get its attributes and build hierarchy
+    // For each category, get its attributes (if any) and build hierarchy
     const categoriesWithDetails = await Promise.all(
       categories.map(async (category) => {
-        // Get attributes for this category
+        // Get attributes for this category (if any)
         const [attributes] = await connection.query<RowDataPacket[]>(
           `SELECT va.id, va.name, va.description, va.format_data
            FROM variable_attribute va
@@ -63,12 +64,13 @@ router.get('/categories', asyncHandler(async (_req: Request, res: Response) => {
           [category.id]
         );
 
-        // Get direct children that are also categories
+        // Get direct children that are either root assets or have attributes
         const [children] = await connection.query<RowDataPacket[]>(
           `SELECT DISTINCT a.* 
            FROM asset a
-           JOIN variable_attribute va ON va.asset_id = a.id
-           WHERE a.id_parent = ?`,
+           LEFT JOIN variable_attribute va ON va.asset_id = a.id
+           WHERE a.id_parent = ?
+           AND (va.id IS NOT NULL OR a.id_parent IS NULL)`,
           [category.id]
         );
 
@@ -482,7 +484,7 @@ router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) 
 }));
 
 // Update an attribute value
-router.put('/:id/attributes/:attributeId', asyncHandler(async (req: Request, res: Response) => {
+router.put('/:id/attributes/:attributeId/value', asyncHandler(async (req: Request, res: Response) => {
   const { id, attributeId } = req.params;
   const { value } = req.body;
   
@@ -544,52 +546,109 @@ router.put('/:id/attributes/:attributeId', asyncHandler(async (req: Request, res
   }
 }));
 
-// Get instances of a category with their attribute values
-router.get('/instances/:categoryId', asyncHandler(async (req: Request, res: Response) => {
-  const { categoryId } = req.params;
+// Update an attribute definition
+router.put('/:id/attributes/:attributeId/definition', asyncHandler(async (req: Request, res: Response) => {
+  const { id, attributeId } = req.params;
+  const { name, description, format_data } = req.body;
   const connection = await pool.getConnection();
   
   try {
-    // Get all instances of the category that are active (state = 1)
+    await connection.beginTransaction();
+
+    // Update the attribute
+    await connection.query(
+      'UPDATE variable_attribute SET name = ?, description = ?, format_data = ? WHERE id = ? AND asset_id = ?',
+      [name, description, format_data, attributeId, id]
+    );
+
+    await connection.commit();
+
+    // Get the updated attribute
+    const [attribute] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM variable_attribute WHERE id = ?',
+      [attributeId]
+    );
+
+    res.json(attribute[0]);
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+// Get instances of an asset
+router.get('/instances/:parentId', asyncHandler(async (req: Request, res: Response) => {
+  const { parentId } = req.params;
+  const connection = await pool.getConnection();
+  
+  try {
+    // Get all instances of the parent, regardless of attributes
     const [instances] = await connection.query<RowDataPacket[]>(
       `SELECT DISTINCT a.*
        FROM asset a
-       LEFT JOIN (
-         SELECT av.asset_id, av.value as state
-         FROM attribute_value av
-         JOIN variable_attribute va ON va.id = av.attribute_id
-         WHERE va.name = 'state'
-         AND NOT EXISTS (
-           SELECT 1 FROM attribute_value av2
-           WHERE av2.asset_id = av.asset_id
-           AND av2.attribute_id = av.attribute_id
-           AND av2.created_at > av.created_at
-         )
-       ) current_state ON current_state.asset_id = a.id
        WHERE a.id_parent = ?
-       AND (current_state.state IS NULL OR current_state.state = '1')
        ORDER BY a.id`,
-      [categoryId]
+      [parentId]
     );
 
-    // Get current attribute values for each instance
+    // Get attributes if they exist
     const instancesWithValues = await Promise.all(
       instances.map(async (instance) => {
-        const [attributeValues] = await connection.query<RowDataPacket[]>(
-          `SELECT av.*
-           FROM attribute_value av
-           WHERE av.asset_id = ?
-           AND NOT EXISTS (
-             SELECT 1 FROM attribute_value av2
-             WHERE av2.asset_id = av.asset_id
-             AND av2.attribute_id = av.attribute_id
-             AND av2.created_at > av.created_at
-           )`,
-          [instance.id]
+        // Check if parent has any attributes
+        const [hasAttributes] = await connection.query<RowDataPacket[]>(
+          `SELECT COUNT(*) as count
+           FROM variable_attribute
+           WHERE asset_id = ?`,
+          [parentId]
         );
+
+        // If parent has no attributes, return instance as is
+        if (hasAttributes[0].count === 0) {
+          return instance;
+        }
+
+        // Otherwise, get the complete attribute chain
+        const [attributes] = await connection.query<RowDataPacket[]>(`
+          WITH RECURSIVE asset_chain AS (
+            SELECT id, name, id_parent
+            FROM asset 
+            WHERE id = ?
+            
+            UNION ALL
+            
+            SELECT p.id, p.name, p.id_parent
+            FROM asset p
+            JOIN asset_chain ac ON p.id = ac.id_parent
+          )
+          SELECT 
+            va.*,
+            a.name as source_asset,
+            av.value,
+            CASE 
+              WHEN va.asset_id = ? THEN false 
+              ELSE true 
+            END as is_inherited
+          FROM asset_chain ac
+          JOIN asset a ON a.id = ac.id
+          JOIN variable_attribute va ON va.asset_id = ac.id
+          LEFT JOIN attribute_value av ON av.attribute_id = va.id 
+            AND av.asset_id = ?
+          ORDER BY ac.id_parent IS NULL DESC, va.name
+        `, [parentId, instance.id, instance.id]);
+
         return {
           ...instance,
-          attributeValues
+          attributes: attributes.map(attr => ({
+            id: attr.id,
+            name: attr.name,
+            description: attr.description,
+            format_data: attr.format_data,
+            value: attr.value,
+            source_asset: attr.source_asset,
+            is_inherited: attr.is_inherited
+          }))
         };
       })
     );
@@ -616,34 +675,115 @@ router.post('/instances', asyncHandler(async (req: Request, res: Response) => {
     
     const instanceId = result.insertId;
 
-    // Insert attribute values if provided
+    // Get all attributes from the entire parent chain
+    const [allAttributes] = await connection.query<RowDataPacket[]>(`
+      WITH RECURSIVE asset_chain AS (
+        -- Start with parent category
+        SELECT id, name, id_parent, 1 as level
+        FROM asset 
+        WHERE id = ?
+        
+        UNION ALL
+        
+        -- Get all ancestors
+        SELECT p.id, p.name, p.id_parent, ac.level + 1
+        FROM asset p
+        JOIN asset_chain ac ON p.id = ac.id_parent
+      )
+      SELECT 
+        va.*,
+        a.name as source_asset,
+        a.id as source_id,
+        ac.level
+      FROM asset_chain ac
+      JOIN asset a ON a.id = ac.id
+      JOIN variable_attribute va ON va.asset_id = ac.id
+      ORDER BY ac.level DESC, va.name
+    `, [id_parent]);
+
+    // Insert values for all attributes (both direct and inherited)
     if (attributeValues && attributeValues.length > 0) {
       for (const { attribute_id, value } of attributeValues) {
-        await connection.query(
-          'INSERT INTO attribute_value (asset_id, attribute_id, value, created_at, updated_at) VALUES (?, ?, ?, NOW(), NOW())',
-          [instanceId, attribute_id, value]
-        );
+        // Verify this attribute belongs to the parent chain
+        const attribute = allAttributes.find(attr => attr.id === attribute_id);
+        if (attribute) {
+          // Trim the value and validate format if exists
+          const trimmedValue = value.trim();
+          if (attribute.format_data) {
+            try {
+              const regex = new RegExp(attribute.format_data);
+              if (!regex.test(trimmedValue)) {
+                await connection.rollback();
+                res.status(400).json({ 
+                  message: `Value for ${attribute.name} does not match required format: ${attribute.format_data}` 
+                });
+                return;
+              }
+            } catch (err) {
+              console.error(`Invalid regex pattern for ${attribute.name}:`, err);
+            }
+          }
+
+          await connection.query(
+            'INSERT INTO attribute_value (asset_id, attribute_id, value, created_at) VALUES (?, ?, ?, NOW())',
+            [instanceId, attribute_id, trimmedValue]
+          );
+        }
       }
     }
 
     await connection.commit();
 
-    // Get the created instance with its values
+    // Get the created instance with all its attribute values
     const [instance] = await connection.query<RowDataPacket[]>(
       'SELECT * FROM asset WHERE id = ?',
       [instanceId]
     );
 
-    const [instanceAttributeValues] = await connection.query<RowDataPacket[]>(
-      `SELECT av.id, av.attribute_id, av.value
-       FROM attribute_value av
-       WHERE av.asset_id = ?`,
-      [instanceId]
-    );
+    // Get all attributes and their values
+    const [instanceAttributes] = await connection.query<RowDataPacket[]>(`
+      WITH RECURSIVE asset_chain AS (
+        -- Start with current instance's parent
+        SELECT id, name, id_parent, 1 as level
+        FROM asset 
+        WHERE id = ?
+        
+        UNION ALL
+        
+        -- Get all ancestors
+        SELECT p.id, p.name, p.id_parent, ac.level + 1
+        FROM asset p
+        JOIN asset_chain ac ON p.id = ac.id_parent
+      )
+      SELECT 
+        va.*,
+        a.name as source_asset,
+        av.value,
+        ac.level,
+        CASE 
+          WHEN va.asset_id = ? THEN false 
+          ELSE true 
+        END as is_inherited
+      FROM asset_chain ac
+      JOIN asset a ON a.id = ac.id
+      JOIN variable_attribute va ON va.asset_id = ac.id
+      LEFT JOIN attribute_value av ON av.attribute_id = va.id 
+        AND av.asset_id = ?
+      ORDER BY ac.level DESC, va.name
+    `, [id_parent, instanceId, instanceId]);
 
     res.status(201).json({
       ...instance[0],
-      attributeValues: instanceAttributeValues
+      attributes: instanceAttributes.map(attr => ({
+        id: attr.id,
+        name: attr.name,
+        description: attr.description,
+        format_data: attr.format_data,
+        value: attr.value,
+        source_asset: attr.source_asset,
+        is_inherited: attr.is_inherited,
+        level: attr.level
+      }))
     });
   } catch (error) {
     await connection.rollback();
@@ -658,11 +798,10 @@ router.get('/categories/roots', asyncHandler(async (_req: Request, res: Response
   console.log('Root categories endpoint called');
   const connection = await pool.getConnection();
   try {
-    // Get root level categories (those with attributes and no parent)
+    // Get all root level assets
     const [rootCategories] = await connection.query<RowDataPacket[]>(
       `SELECT DISTINCT a.* 
        FROM asset a
-       JOIN variable_attribute va ON va.asset_id = a.id
        WHERE a.id_parent IS NULL
        ORDER BY a.name`
     );
@@ -672,21 +811,25 @@ router.get('/categories/roots', asyncHandler(async (_req: Request, res: Response
       return;
     }
 
-    // Get attributes for each root category
+    // Get attributes for each root category (if they exist)
     const categoriesWithAttributes = await Promise.all(
       rootCategories.map(async (category) => {
-        const [attributes] = await connection.query<RowDataPacket[]>(
-          `SELECT va.id, va.name, va.description, va.format_data
-           FROM variable_attribute va
-           WHERE va.asset_id = ?`,
-          [category.id]
-        );
+        // Check if category has attributes
+        const [attributes] = await connection.query<RowDataPacket[]>(`
+          SELECT 
+            va.*,
+            a.name as source_asset,
+            false as is_inherited
+          FROM asset a
+          LEFT JOIN variable_attribute va ON va.asset_id = a.id
+          WHERE a.id = ?
+          ORDER BY va.name
+        `, [category.id]);
 
-        // Check if this category has children that are also categories
+        // Check if this category has children
         const [hasChildren] = await connection.query<RowDataPacket[]>(
           `SELECT COUNT(*) as count
            FROM asset a
-           JOIN variable_attribute va ON va.asset_id = a.id
            WHERE a.id_parent = ?`,
           [category.id]
         );
@@ -733,12 +876,33 @@ router.get('/categories/:parentId/children', asyncHandler(async (req: Request, r
     // Get attributes and check for children
     const categoriesWithDetails = await Promise.all(
       childCategories.map(async (category) => {
-        const [attributes] = await connection.query<RowDataPacket[]>(
-          `SELECT va.id, va.name, va.description, va.format_data
-           FROM variable_attribute va
-           WHERE va.asset_id = ?`,
-          [category.id]
-        );
+        // Get all attributes (including inherited) using recursive CTE
+        const [attributes] = await connection.query<RowDataPacket[]>(`
+          WITH RECURSIVE asset_chain AS (
+            -- Start with current category
+            SELECT id, name, id_parent
+            FROM asset 
+            WHERE id = ?
+            
+            UNION ALL
+            
+            -- Get all ancestors
+            SELECT p.id, p.name, p.id_parent
+            FROM asset p
+            JOIN asset_chain ac ON p.id = ac.id_parent
+          )
+          SELECT 
+            va.*,
+            a.name as source_asset,
+            CASE 
+              WHEN va.asset_id = ? THEN false 
+              ELSE true 
+            END as is_inherited
+          FROM asset_chain ac
+          JOIN asset a ON a.id = ac.id
+          JOIN variable_attribute va ON va.asset_id = ac.id
+          ORDER BY va.name
+        `, [category.id, category.id]);
 
         // Check if this category has children that are also categories
         const [hasChildren] = await connection.query<RowDataPacket[]>(
@@ -806,6 +970,260 @@ router.delete('/:id', asyncHandler(async (req: Request, res: Response) => {
   } catch (error) {
     await connection.rollback();
     throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+// Get all attributes for an asset (including inherited ones)
+router.get('/:id/all-attributes', asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const connection = await pool.getConnection();
+  
+  try {
+    const [attributes] = await connection.query<RowDataPacket[]>(`
+      WITH RECURSIVE asset_chain AS (
+        -- Start with current asset
+        SELECT id, name, id_parent, 1 as level
+        FROM asset 
+        WHERE id = ?
+        
+        UNION ALL
+        
+        -- Get all ancestors
+        SELECT p.id, p.name, p.id_parent, ac.level + 1
+        FROM asset p
+        JOIN asset_chain ac ON p.id = ac.id_parent
+      )
+      SELECT 
+        va.*,
+        a.name as source_asset,
+        CASE 
+          WHEN va.asset_id = ? THEN false 
+          ELSE true 
+        END as is_inherited
+      FROM asset_chain ac
+      JOIN asset a ON a.id = ac.id
+      JOIN variable_attribute va ON va.asset_id = ac.id
+      ORDER BY ac.level DESC, va.name
+    `, [id, id]);
+
+    res.json(attributes);
+  } catch (error) {
+    console.error('Error fetching attributes:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    connection.release();
+  }
+}));
+
+// Add new endpoint for inherited attributes
+router.get('/:id/inherited-attributes', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const query = `
+      WITH RECURSIVE asset_chain AS (
+        -- Start with the current asset and get its parent
+        SELECT a.id, a.name, a.id_parent, 1 as level
+        FROM asset a
+        WHERE a.id = ?
+        
+        UNION ALL
+        
+        -- Get all ancestors recursively
+        SELECT p.id, p.name, p.id_parent, ac.level + 1
+        FROM asset p
+        INNER JOIN asset_chain ac ON p.id = ac.id_parent
+      ),
+      all_attributes AS (
+        -- Get attributes from the entire chain
+        SELECT DISTINCT 
+          va.*,
+          a.name as sourceAsset,
+          a.id as source_id,
+          ac.level,
+          COALESCE(
+            (SELECT av.value 
+             FROM attribute_value av 
+             WHERE av.attribute_id = va.id 
+             AND av.asset_id = a.id
+             ORDER BY av.created_at DESC 
+             LIMIT 1),
+            va.default_value
+          ) as default_value,
+          true as required
+        FROM asset_chain ac
+        JOIN asset a ON a.id = ac.id
+        JOIN variable_attribute va ON va.asset_id = a.id
+      )
+      SELECT * FROM all_attributes
+      ORDER BY level DESC, name;
+    `;
+    
+    const [results] = await pool.query(query, [id]);
+    res.json(results);
+  } catch (error) {
+    console.error('Error fetching inherited attributes:', error);
+    res.status(500).json({ error: 'Failed to fetch inherited attributes' });
+  }
+});
+
+// Delete an attribute
+router.delete('/:id/attributes/:attributeId', asyncHandler(async (req: Request, res: Response) => {
+  const { id, attributeId } = req.params;
+  const connection = await pool.getConnection();
+  
+  try {
+    await connection.beginTransaction();
+
+    // Delete attribute values first (due to foreign key constraints)
+    await connection.query(
+      'DELETE FROM attribute_value WHERE asset_id = ? AND attribute_id = ?',
+      [id, attributeId]
+    );
+
+    // Delete the attribute
+    await connection.query(
+      'DELETE FROM variable_attribute WHERE id = ? AND asset_id = ?',
+      [attributeId, id]
+    );
+
+    await connection.commit();
+    res.status(200).json({ message: 'Attribute deleted successfully' });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+// Get referenced assets for an attribute value
+router.get('/:assetId/attributes/:attributeId/references', asyncHandler(async (req: Request, res: Response) => {
+  const { assetId, attributeId } = req.params;
+  const connection = await pool.getConnection();
+
+  try {
+    // First verify this is an asset_reference attribute
+    const [attributes] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM variable_attribute WHERE id = ? AND format_data = ?',
+      [attributeId, 'asset_reference']
+    );
+
+    if (!attributes[0]) {
+      res.status(400).json({ message: 'Not an asset reference attribute' });
+      return;
+    }
+
+    // Get the attribute value record
+    const [attributeValues] = await connection.query<RowDataPacket[]>(
+      'SELECT id FROM attribute_value WHERE asset_id = ? AND attribute_id = ?',
+      [assetId, attributeId]
+    );
+
+    const attributeValueId = attributeValues[0]?.id;
+
+    if (!attributeValueId) {
+      res.json({ references: [] });
+      return;
+    }
+
+    // Get all referenced assets
+    const [references] = await connection.query<RowDataPacket[]>(
+      `SELECT a.*, ar.is_deleted, ar.deleted_at 
+       FROM attribute_asset_reference ar
+       JOIN asset a ON ar.referenced_asset_id = a.id
+       WHERE ar.attribute_value_id = ?`,
+      [attributeValueId]
+    );
+
+    res.json({ references });
+  } finally {
+    connection.release();
+  }
+}));
+
+// Add a reference to an asset
+router.post('/:assetId/attributes/:attributeId/references', asyncHandler(async (req: Request, res: Response) => {
+  const { assetId, attributeId } = req.params;
+  const { referencedAssetId } = req.body;
+  const connection = await pool.getConnection();
+
+  try {
+    await connection.beginTransaction();
+
+    // Verify this is an asset_reference attribute
+    const [attributes] = await connection.query<RowDataPacket[]>(
+      'SELECT * FROM variable_attribute WHERE id = ? AND format_data = ?',
+      [attributeId, 'asset_reference']
+    );
+
+    if (!attributes[0]) {
+      await connection.rollback();
+      res.status(400).json({ message: 'Not an asset reference attribute' });
+      return;
+    }
+
+    // Get or create attribute value record
+    let [attributeValues] = await connection.query<RowDataPacket[]>(
+      'SELECT id FROM attribute_value WHERE asset_id = ? AND attribute_id = ?',
+      [assetId, attributeId]
+    );
+
+    let attributeValueId: number;
+
+    if (!attributeValues[0]) {
+      const [result] = await connection.query<ResultSetHeader>(
+        'INSERT INTO attribute_value (asset_id, attribute_id, value) VALUES (?, ?, ?)',
+        [assetId, attributeId, '']  // Empty value since the actual references are in another table
+      );
+      attributeValueId = result.insertId;
+    } else {
+      attributeValueId = attributeValues[0].id;
+    }
+
+    // Add the reference
+    await connection.query(
+      'INSERT INTO attribute_asset_reference (attribute_value_id, referenced_asset_id) VALUES (?, ?)',
+      [attributeValueId, referencedAssetId]
+    );
+
+    await connection.commit();
+    res.status(201).json({ message: 'Reference added successfully' });
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}));
+
+// Remove a reference
+router.delete('/:assetId/attributes/:attributeId/references/:referencedAssetId', asyncHandler(async (req: Request, res: Response) => {
+  const { assetId, attributeId, referencedAssetId } = req.params;
+  const connection = await pool.getConnection();
+
+  try {
+    // Get the attribute value record
+    const [attributeValues] = await connection.query<RowDataPacket[]>(
+      'SELECT id FROM attribute_value WHERE asset_id = ? AND attribute_id = ?',
+      [assetId, attributeId]
+    );
+
+    if (!attributeValues[0]) {
+      res.status(404).json({ message: 'Reference not found' });
+      return;
+    }
+
+    // Soft delete the reference
+    await connection.query(
+      `UPDATE attribute_asset_reference 
+       SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP 
+       WHERE attribute_value_id = ? AND referenced_asset_id = ?`,
+      [attributeValues[0].id, referencedAssetId]
+    );
+
+    res.json({ message: 'Reference removed successfully' });
   } finally {
     connection.release();
   }
