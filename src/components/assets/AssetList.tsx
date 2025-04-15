@@ -157,40 +157,49 @@ export const AssetList: React.FC = () => {
     fetchRootAssets();
   };
 
-  const handleSubmitAsset = async (data: { 
-    name: string; 
-    attributes: { 
-      id: number; 
-      value: string; 
-    }[]; 
+  const handleSubmitAsset = async (assetData: {
+    name: string;
+    id_parent?: number;
+    attributes: { id: number; value: string; }[];
   }) => {
     try {
+      // First create the asset
       const response = await fetch(`${API_BASE_URL}/assets`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          name: data.name,
-          id_parent: selectedAsset?.id || null,
-          attributes: data.attributes
+          name: assetData.name,
+          id_parent: assetData.id_parent
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to create asset');
-      
-      // Refresh the current level
-      if (selectedAsset) {
-        fetchChildren(selectedAsset.id);
-      } else {
-        fetchRootAssets();
+      if (!response.ok) {
+        throw new Error('Failed to create asset');
       }
-      
+
+      const newAsset = await response.json();
+
+      // Then update each attribute value
+      const attributePromises = assetData.attributes.map(attr => 
+        fetch(`${API_BASE_URL}/assets/${newAsset.id}/attributes/${attr.id}/value`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ value: attr.value }),
+        })
+      );
+
+      await Promise.all(attributePromises);
+
+      toast.success('Asset created successfully');
       setIsAddModalOpen(false);
-      toast.success('Asset added successfully');
-    } catch (err) {
-      console.error('Error adding asset:', err);
-      toast.error('Failed to add asset');
+      fetchAssets(); // Refresh the list
+    } catch (error) {
+      console.error('Error creating asset:', error);
+      toast.error('Failed to create asset');
     }
   };
 
@@ -431,6 +440,19 @@ export const AssetList: React.FC = () => {
         )}
       </div>
     );
+  };
+
+  const fetchAssets = async () => {
+    try {
+      if (selectedAsset) {
+        await fetchChildren(selectedAsset.id);
+      } else {
+        await fetchRootAssets();
+      }
+    } catch (error) {
+      console.error('Error fetching assets:', error);
+      toast.error('Failed to fetch assets');
+    }
   };
 
   if (loading) {

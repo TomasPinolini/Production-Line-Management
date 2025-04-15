@@ -2,28 +2,29 @@ import React, { useState, useEffect } from 'react';
 import { Asset, VariableAttribute } from '../../types';
 import { Edit2, Trash2, Plus } from 'lucide-react';
 import toast from 'react-hot-toast';
+import Select from 'react-select';
 
-const API_BASE_URL = 'http://localhost:3000/api';
-
-interface AssetInstance extends Asset {
-  attributeValues: Array<{
-    id: number;
-    attribute_id: number;
-    value: string;
-  }>;
+interface AssetAttribute extends Omit<VariableAttribute, 'value'> {
+  value: string | undefined;
+  source_asset: string;
+  is_inherited: boolean;
 }
 
-interface CategoryOption {
-  id: number;
-  name: string;
-  attributes: VariableAttribute[];
-  hasChildren: boolean;
+interface AssetInstance extends Omit<Asset, 'attributes'> {
+  attributes: AssetAttribute[];
 }
 
 interface CategoryLevel {
   categoryId: number | null;
-  options: CategoryOption[];
+  options: Array<{
+    id: number;
+    name: string;
+    attributes: Array<VariableAttribute & { source_asset?: string; is_inherited?: boolean }>;
+    hasChildren: boolean;
+  }>;
 }
+
+const API_BASE_URL = 'http://localhost:3000/api';
 
 export const AssetInstances: React.FC = () => {
   const [instances, setInstances] = useState<AssetInstance[]>([]);
@@ -31,6 +32,7 @@ export const AssetInstances: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [availableAssets, setAvailableAssets] = useState<Asset[]>([]);
 
   // Form state
   const [formData, setFormData] = useState({
@@ -38,7 +40,7 @@ export const AssetInstances: React.FC = () => {
     attributeValues: {} as Record<number, string>
   });
 
-  // Get the currently selected category (last selected with no children or last in the chain)
+  // Get the currently selected category
   const selectedCategory = categoryLevels.length > 0 
     ? categoryLevels[categoryLevels.length - 1].options.find(
         cat => cat.id === categoryLevels[categoryLevels.length - 1].categoryId
@@ -54,6 +56,10 @@ export const AssetInstances: React.FC = () => {
       fetchInstances(selectedCategory.id);
     }
   }, [selectedCategory]);
+
+  useEffect(() => {
+    fetchAvailableAssets();
+  }, []);
 
   const fetchRootCategories = async () => {
     try {
@@ -90,7 +96,6 @@ export const AssetInstances: React.FC = () => {
 
   const handleCategoryChange = async (levelIndex: number, categoryId: number | null) => {
     try {
-      // Update the selected category at this level
       const updatedLevels = [...categoryLevels.slice(0, levelIndex + 1)];
       updatedLevels[levelIndex] = {
         ...updatedLevels[levelIndex],
@@ -101,6 +106,7 @@ export const AssetInstances: React.FC = () => {
         const selectedCat = categoryLevels[levelIndex].options.find(cat => cat.id === categoryId);
         if (selectedCat?.hasChildren) {
           const childCategories = await fetchChildCategories(categoryId);
+          console.log('Child categories with attributes:', childCategories);
           updatedLevels.push({ categoryId: null, options: childCategories });
         }
       }
@@ -116,10 +122,9 @@ export const AssetInstances: React.FC = () => {
     try {
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/assets/instances/${categoryId}`);
-      if (!response.ok) {
-        throw new Error('Failed to load instances');
-      }
+      if (!response.ok) throw new Error('Failed to load instances');
       const data = await response.json();
+      console.log('Fetched instances data:', data);
       setInstances(data);
       setError(null);
     } catch (err) {
@@ -130,10 +135,32 @@ export const AssetInstances: React.FC = () => {
     }
   };
 
+  const fetchAllAttributes = async (categoryId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/assets/${categoryId}/all-attributes`);
+      if (!response.ok) throw new Error('Failed to load attributes');
+      const data = await response.json();
+      console.log('Fetched attributes data:', data);
+      return data;
+    } catch (err) {
+      console.error('Error fetching attributes:', err);
+      toast.error('Failed to load attributes');
+      return [];
+    }
+  };
+
   const validateAttributeValue = (value: string, format: string): boolean => {
     try {
+      const trimmedValue = value.trim();
+      console.log('Validating value:', {
+        original: value,
+        trimmed: trimmedValue,
+        format: format
+      });
       const regex = new RegExp(format);
-      return regex.test(value);
+      const isValid = regex.test(trimmedValue);
+      console.log('Validation result:', isValid);
+      return isValid;
     } catch (err) {
       console.error('Invalid regex pattern:', err);
       return false;
@@ -141,11 +168,16 @@ export const AssetInstances: React.FC = () => {
   };
 
   const handleAttributeChange = (attributeId: number, value: string) => {
+    console.log('Attribute change:', {
+      attributeId,
+      value,
+      trimmedValue: value.trim()
+    });
     setFormData(prev => ({
       ...prev,
       attributeValues: {
         ...prev.attributeValues,
-        [attributeId]: value
+        [attributeId]: value.trim()
       }
     }));
   };
@@ -157,7 +189,7 @@ export const AssetInstances: React.FC = () => {
     // Validate all attributes
     const invalidAttributes = selectedCategory.attributes.filter(attr => {
       const value = formData.attributeValues[attr.id] || '';
-      return attr.format_data && !validateAttributeValue(value, attr.format_data);
+      return !attr.is_reference && attr.format_data && !validateAttributeValue(value, attr.format_data);
     });
 
     if (invalidAttributes.length > 0) {
@@ -166,6 +198,17 @@ export const AssetInstances: React.FC = () => {
     }
 
     try {
+      const attributeValues = selectedCategory.attributes.map(attr => {
+        const value = formData.attributeValues[attr.id] || '';
+        return {
+          attribute_id: attr.id,
+          value: attr.is_reference ? null : value,
+          referenced_asset_id: attr.is_reference ? parseInt(value) : null
+        };
+      });
+
+      console.log('Submitting with attribute values:', attributeValues);
+
       const response = await fetch(`${API_BASE_URL}/assets/instances`, {
         method: 'POST',
         headers: {
@@ -174,63 +217,133 @@ export const AssetInstances: React.FC = () => {
         body: JSON.stringify({
           name: formData.name,
           id_parent: selectedCategory.id,
-          attributeValues: Object.entries(formData.attributeValues).map(([id, value]) => ({
-            attribute_id: parseInt(id),
-            value
-          }))
+          attributeValues
         }),
       });
 
-      if (!response.ok) throw new Error('Failed to create instance');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to create instance');
+      }
       
       toast.success('Instance created successfully');
       setIsAddModalOpen(false);
       setFormData({ name: '', attributeValues: {} });
       fetchInstances(selectedCategory.id);
     } catch (err) {
-      toast.error('Failed to create instance');
+      console.error('Error creating instance:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to create instance');
     }
   };
 
-  const renderAttributeInput = (attribute: VariableAttribute) => {
+  const fetchAvailableAssets = async () => {
+    try {
+      // Fetch the complete hierarchy of assets
+      const response = await fetch(`${API_BASE_URL}/assets/hierarchy`);
+      if (!response.ok) throw new Error('Failed to fetch assets');
+      const data = await response.json();
+      setAvailableAssets(data);
+    } catch (error) {
+      console.error('Error fetching available assets:', error);
+      toast.error('Failed to fetch available assets');
+    }
+  };
+
+  const getAssetsUnderParent = (parentId: number): Asset[] => {
+    return availableAssets.filter(asset => {
+      // Start with the current asset
+      if (asset.id_parent === parentId) return true;
+      
+      // Check the parent chain
+      let currentParentId = asset.id_parent;
+      while (currentParentId) {
+        const parentAsset = availableAssets.find(a => a.id === currentParentId);
+        if (!parentAsset) break;
+        
+        if (parentAsset.id_parent === parentId) {
+          return true;
+        }
+        currentParentId = parentAsset.id_parent;
+      }
+      return false;
+    });
+  };
+
+  const renderAttributeInput = (attribute: VariableAttribute & { source_asset?: string }) => {
     const value = formData.attributeValues[attribute.id] || '';
     const isValid = !attribute.format_data || validateAttributeValue(value, attribute.format_data);
+
+    // For reference attributes, get all assets under the referenced parent category
+    const relevantAssets = attribute.is_reference && attribute.asset_id
+      ? getAssetsUnderParent(attribute.asset_id)
+      : [];
+
+    const selectedAsset = attribute.is_reference && value 
+      ? relevantAssets.find(asset => asset.id.toString() === value)
+      : null;
 
     return (
       <div key={attribute.id} className="mb-4">
         <label className="block text-sm font-medium text-gray-700">
           {attribute.name}
+          {attribute.source_asset && (
+            <span className="ml-1 text-xs text-blue-600">
+              (from {attribute.source_asset})
+            </span>
+          )}
           {attribute.description && (
-            <span className="ml-1 text-sm text-gray-500">({attribute.description})</span>
+            <span className="ml-1 text-sm text-gray-500">
+              ({attribute.description})
+            </span>
           )}
         </label>
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => handleAttributeChange(attribute.id, e.target.value)}
-          className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm
-            ${!isValid && value ? 'border-red-300' : ''}`}
-        />
-        {attribute.format_data && (
-          <div className="mt-1 space-y-1">
-            <p className="text-sm text-gray-500">
-              Required format: {attribute.format_data}
-            </p>
-            <p className="text-xs text-gray-400">
-              This is a validation pattern that ensures your input matches the required format.
-              {attribute.format_data.includes('\\d') && ' Numbers are required.'}
-              {attribute.format_data.includes('[A-Z]') && ' Uppercase letters are required.'}
-              {attribute.format_data.includes('[a-z]') && ' Lowercase letters are required.'}
-              {attribute.format_data.includes('[0-9A-Fa-f]') && ' Hexadecimal characters are required.'}
-            </p>
-          </div>
+        {attribute.is_reference ? (
+          <Select
+            value={selectedAsset ? { value: selectedAsset.id, label: selectedAsset.name } : null}
+            onChange={(option) => handleAttributeChange(attribute.id, option ? option.value.toString() : '')}
+            options={relevantAssets.map(asset => ({
+              value: asset.id,
+              label: asset.name
+            }))}
+            isClearable
+            isSearchable
+            placeholder={`Search and select a ${attribute.name.toLowerCase()}...`}
+            className="mt-1"
+            classNamePrefix="react-select"
+            noOptionsMessage={() => `No ${attribute.name.toLowerCase()} found`}
+            styles={{
+              control: (base) => ({
+                ...base,
+                borderColor: '#D1D5DB',
+                '&:hover': {
+                  borderColor: '#3B82F6'
+                }
+              }),
+              option: (base, state) => ({
+                ...base,
+                backgroundColor: state.isSelected ? '#3B82F6' : state.isFocused ? '#BFDBFE' : 'white',
+                color: state.isSelected ? 'white' : '#111827'
+              })
+            }}
+          />
+        ) : (
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => handleAttributeChange(attribute.id, e.target.value)}
+            className={`mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm
+              ${!isValid && value ? 'border-red-300' : ''}`}
+            required
+          />
         )}
-        {!isValid && value && (
-          <p className="mt-1 text-sm text-red-600 flex items-center">
-            <svg className="h-4 w-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-            </svg>
-            The value does not match the required format pattern
+        {attribute.format_data && !attribute.is_reference && (
+          <p className="mt-1 text-sm text-gray-500">
+            Format: {attribute.format_data}
+          </p>
+        )}
+        {!isValid && value && !attribute.is_reference && (
+          <p className="mt-1 text-sm text-red-600">
+            Value does not match the required format
           </p>
         )}
       </div>
@@ -259,67 +372,96 @@ export const AssetInstances: React.FC = () => {
     );
   }
 
+  // Group attributes by source for display
+  const getAttributesBySource = (category: { 
+    name: string;
+    attributes: Array<VariableAttribute & { source_asset?: string; is_inherited?: boolean }> 
+  }) => {
+    return category.attributes.reduce((groups, attr) => {
+      const source = attr.is_inherited ? attr.source_asset || 'Unknown' : category.name;
+      if (!groups[source]) {
+        groups[source] = [];
+      }
+      groups[source].push(attr);
+      return groups;
+    }, {} as Record<string, Array<VariableAttribute & { source_asset?: string; is_inherited?: boolean }>>);
+  };
+
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="mb-6">
-        <h2 className="text-2xl font-bold mb-4">Select Category</h2>
-        <div className="space-y-4">
-          {categoryLevels.map((level, index) => (
-            <div key={`level-${index}`} className="flex items-center space-x-2">
-              <select
-                value={level.categoryId || ''}
-                onChange={(e) => handleCategoryChange(index, e.target.value ? Number(e.target.value) : null)}
-                className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-              >
-                <option value="">Select {index === 0 ? 'Category' : 'Subcategory'}</option>
-                {level.options.map((category) => (
-                  <option key={`cat-${category.id}-level-${index}`} value={category.id}>
-                    {category.name}
-                  </option>
-                ))}
-              </select>
-              {index === categoryLevels.length - 1 && level.categoryId && (
-                <button
-                  onClick={() => setIsAddModalOpen(true)}
-                  className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Instance
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
+      <div className="mb-8 space-y-4">
+        {categoryLevels.map((level, index) => (
+          <div key={index} className="flex items-center space-x-2">
+            <select
+              value={level.categoryId || ''}
+              onChange={(e) => handleCategoryChange(index, e.target.value ? parseInt(e.target.value) : null)}
+              className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+            >
+              <option value="">Select {index === 0 ? 'Category' : 'Subcategory'}</option>
+              {level.options.map(cat => (
+                <option key={cat.id} value={cat.id}>
+                  {cat.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
       </div>
 
       {selectedCategory && (
-        <div>
-          <h2 className="text-2xl font-bold mb-4">Instances of {selectedCategory.name}</h2>
+        <>
+          <div className="flex justify-between items-center mb-6">
+            <h2 className="text-2xl font-bold">
+              Instances of {selectedCategory.name}
+            </h2>
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="flex items-center px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700"
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              Add Instance
+            </button>
+          </div>
+
           <div className="bg-white shadow overflow-hidden sm:rounded-lg">
             <table className="min-w-full divide-y divide-gray-200">
               <thead className="bg-gray-50">
                 <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-                  {selectedCategory.attributes.map(attr => (
-                    <th key={`header-${attr.id}`} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Name
+                  </th>
+                  {instances[0]?.attributes.map(attr => (
+                    <th 
+                      key={`header-${attr.id}`} 
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
                       {attr.name}
+                      {attr.is_inherited && (
+                        <span className="ml-1 text-xs text-blue-600 normal-case">
+                          (from {attr.source_asset})
+                        </span>
+                      )}
                     </th>
                   ))}
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {instances.map(instance => (
-                  <tr key={`instance-${instance.id}`}>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{instance.name}</td>
-                    {selectedCategory.attributes.map(attr => {
-                      const attributeValue = instance.attributeValues.find(av => av.attribute_id === attr.id);
-                      return (
-                        <td key={`value-${instance.id}-${attr.id}`} className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                          {attributeValue?.value || '-'}
-                        </td>
-                      );
-                    })}
+                  <tr key={instance.id}>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {instance.name}
+                    </td>
+                    {instance.attributes.map(attr => (
+                      <td 
+                        key={`value-${instance.id}-${attr.id}`} 
+                        className="px-6 py-4 whitespace-nowrap text-sm text-gray-500"
+                      >
+                        {attr.value || '-'}
+                      </td>
+                    ))}
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <div className="flex space-x-2">
                         <button className="text-blue-600 hover:text-blue-800">
@@ -335,7 +477,7 @@ export const AssetInstances: React.FC = () => {
               </tbody>
             </table>
           </div>
-        </div>
+        </>
       )}
 
       {isAddModalOpen && selectedCategory && (
@@ -357,8 +499,16 @@ export const AssetInstances: React.FC = () => {
                   required
                 />
               </div>
-              
-              {selectedCategory.attributes.map(renderAttributeInput)}
+
+              {/* Group attributes by source */}
+              {Object.entries(getAttributesBySource(selectedCategory)).map(([source, attributes]) => (
+                <div key={source} className="mb-6">
+                  <h4 className="text-sm font-medium text-gray-700 mb-2">
+                    {source === selectedCategory.name ? 'Instance Attributes' : `Attributes from ${source}`}
+                  </h4>
+                  {attributes.map(attr => renderAttributeInput(attr))}
+                </div>
+              ))}
 
               <div className="mt-6 flex justify-end space-x-3">
                 <button

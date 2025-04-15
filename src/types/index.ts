@@ -20,6 +20,10 @@ interface VariableAttribute {
   asset_id: number;
   created_at?: string;
   updated_at?: string;
+  source_asset?: string;
+  is_inherited?: boolean;
+  is_reference?: boolean;
+  referenced_asset_id?: number;
 }
 
 interface AssetType {

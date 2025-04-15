@@ -430,14 +430,14 @@ router.get('/:id/attributes', asyncHandler(async (req: Request, res: Response) =
 // Add a new attribute to an asset
 router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { name, description, format_data, value } = req.body;
+  const { name, description, format_data, value, is_reference, referenced_asset_id } = req.body;
   
   const connection = await pool.getConnection();
   await connection.beginTransaction();
   
   try {
     // Validate the value against the format pattern if both are provided
-    if (format_data && value !== undefined) {
+    if (format_data && value !== undefined && !is_reference) {
       try {
         const regex = new RegExp(format_data);
         if (!regex.test(value)) {
@@ -446,7 +446,19 @@ router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) 
         }
       } catch (err) {
         console.error('Invalid regex pattern:', err);
-        // If the regex is invalid, we'll still allow the creation
+      }
+    }
+
+    // If this is a reference attribute, validate the referenced asset exists
+    if (is_reference && referenced_asset_id) {
+      const [asset] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM asset WHERE id = ?',
+        [referenced_asset_id]
+      );
+      
+      if (!asset[0]) {
+        res.status(400).json({ message: 'Referenced asset does not exist' });
+        return;
       }
     }
 
@@ -462,15 +474,34 @@ router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) 
         'INSERT INTO attribute_value (asset_id, attribute_id, value) VALUES (?, ?, ?)',
         [id, result.insertId, value]
       );
+
+      // If this is a reference attribute, create the reference
+      if (is_reference && referenced_asset_id) {
+        await connection.query(
+          'INSERT INTO attribute_asset_reference (attribute_value_id, referenced_asset_id) VALUES (?, ?)',
+          [result.insertId, referenced_asset_id]
+        );
+      }
     }
     
     await connection.commit();
     
-    // Get the complete attribute with its value
-    const [attribute] = await pool.query<RowDataPacket[]>(`
-      SELECT va.*, av.value 
+    // Get the complete attribute with its value and reference
+    const [attribute] = await connection.query<RowDataPacket[]>(`
+      SELECT 
+        va.*, 
+        av.value,
+        CASE 
+          WHEN aar.referenced_asset_id IS NOT NULL THEN JSON_OBJECT(
+            'id', a.id,
+            'name', a.name
+          )
+          ELSE NULL
+        END as referenced_asset
       FROM variable_attribute va
       LEFT JOIN attribute_value av ON va.id = av.attribute_id AND av.asset_id = ?
+      LEFT JOIN attribute_asset_reference aar ON av.id = aar.attribute_value_id AND aar.is_deleted = FALSE
+      LEFT JOIN asset a ON aar.referenced_asset_id = a.id
       WHERE va.id = ?
     `, [id, result.insertId]);
     
@@ -486,7 +517,7 @@ router.post('/:id/attributes', asyncHandler(async (req: Request, res: Response) 
 // Update an attribute value
 router.put('/:id/attributes/:attributeId/value', asyncHandler(async (req: Request, res: Response) => {
   const { id, attributeId } = req.params;
-  const { value } = req.body;
+  const { value, is_reference, referenced_asset_id } = req.body;
   
   const connection = await pool.getConnection();
   await connection.beginTransaction();
@@ -503,9 +534,9 @@ router.put('/:id/attributes/:attributeId/value', asyncHandler(async (req: Reques
       return;
     }
 
-    // Validate the value against the format pattern
+    // Validate the value against the format pattern if not a reference
     const { format_data } = attributes[0];
-    if (format_data) {
+    if (format_data && !is_reference) {
       try {
         const regex = new RegExp(format_data);
         if (!regex.test(value)) {
@@ -517,19 +548,60 @@ router.put('/:id/attributes/:attributeId/value', asyncHandler(async (req: Reques
       }
     }
 
+    // If this is a reference attribute, validate the referenced asset exists
+    if (is_reference && referenced_asset_id) {
+      const [asset] = await connection.query<RowDataPacket[]>(
+        'SELECT id FROM asset WHERE id = ?',
+        [referenced_asset_id]
+      );
+      
+      if (!asset[0]) {
+        res.status(400).json({ message: 'Referenced asset does not exist' });
+        return;
+      }
+    }
+
     // Always insert a new value (versioning)
-    await connection.query(
+    const [valueResult] = await connection.query<ResultSetHeader>(
       'INSERT INTO attribute_value (asset_id, attribute_id, value, created_at) VALUES (?, ?, ?, NOW())',
       [id, attributeId, value]
     );
+
+    // Handle asset reference if this is a reference attribute
+    if (is_reference) {
+      // Soft delete any existing references for this attribute value
+      await connection.query(
+        'UPDATE attribute_asset_reference SET is_deleted = TRUE, deleted_at = NOW() WHERE attribute_value_id IN (SELECT id FROM attribute_value WHERE asset_id = ? AND attribute_id = ?)',
+        [id, attributeId]
+      );
+
+      // Create new reference if provided
+      if (referenced_asset_id) {
+        await connection.query(
+          'INSERT INTO attribute_asset_reference (attribute_value_id, referenced_asset_id) VALUES (?, ?)',
+          [valueResult.insertId, referenced_asset_id]
+        );
+      }
+    }
     
     await connection.commit();
     
     // Get all values for this attribute, ordered by creation time
     const [attributeValues] = await connection.query<RowDataPacket[]>(`
-      SELECT av.*, va.name as attribute_name
+      SELECT 
+        av.*,
+        va.name as attribute_name,
+        CASE 
+          WHEN aar.referenced_asset_id IS NOT NULL THEN JSON_OBJECT(
+            'id', a.id,
+            'name', a.name
+          )
+          ELSE NULL
+        END as referenced_asset
       FROM attribute_value av
       JOIN variable_attribute va ON va.id = av.attribute_id
+      LEFT JOIN attribute_asset_reference aar ON av.id = aar.attribute_value_id AND aar.is_deleted = FALSE
+      LEFT JOIN asset a ON aar.referenced_asset_id = a.id
       WHERE av.asset_id = ? AND av.attribute_id = ?
       ORDER BY av.created_at DESC
     `, [id, attributeId]);
@@ -678,14 +750,12 @@ router.post('/instances', asyncHandler(async (req: Request, res: Response) => {
     // Get all attributes from the entire parent chain
     const [allAttributes] = await connection.query<RowDataPacket[]>(`
       WITH RECURSIVE asset_chain AS (
-        -- Start with parent category
         SELECT id, name, id_parent, 1 as level
         FROM asset 
         WHERE id = ?
         
         UNION ALL
         
-        -- Get all ancestors
         SELECT p.id, p.name, p.id_parent, ac.level + 1
         FROM asset p
         JOIN asset_chain ac ON p.id = ac.id_parent
@@ -701,14 +771,57 @@ router.post('/instances', asyncHandler(async (req: Request, res: Response) => {
       ORDER BY ac.level DESC, va.name
     `, [id_parent]);
 
-    // Insert values for all attributes (both direct and inherited)
+    // Insert values for all attributes
     if (attributeValues && attributeValues.length > 0) {
       for (const { attribute_id, value } of attributeValues) {
-        // Verify this attribute belongs to the parent chain
+        // Find the attribute definition
         const attribute = allAttributes.find(attr => attr.id === attribute_id);
-        if (attribute) {
-          // Trim the value and validate format if exists
-          const trimmedValue = value.trim();
+        if (!attribute) continue;
+
+        // Check if this is a reference attribute by looking at format_data
+        const isReference = attribute.format_data?.startsWith('ref:');
+        const referencedTypeId = isReference ? parseInt(attribute.format_data.split(':')[1]) : null;
+
+        if (isReference && referencedTypeId) {
+          // For reference attributes, validate that the referenced asset exists and is of the correct type
+          const referencedAssetId = parseInt(value);
+          if (isNaN(referencedAssetId)) {
+            await connection.rollback();
+            res.status(400).json({ message: `Invalid reference ID for ${attribute.name}` });
+            return;
+          }
+
+          // Verify the referenced asset exists and is of the correct type
+          const [referencedAsset] = await connection.query<RowDataPacket[]>(
+            `WITH RECURSIVE asset_hierarchy AS (
+              SELECT id, name, id_parent
+              FROM asset
+              WHERE id = ?
+              UNION ALL
+              SELECT a.id, a.name, a.id_parent
+              FROM asset a
+              JOIN asset_hierarchy ah ON a.id = ah.id_parent
+            )
+            SELECT id FROM asset_hierarchy WHERE id = ?`,
+            [referencedAssetId, referencedTypeId]
+          );
+
+          if (referencedAsset.length === 0) {
+            await connection.rollback();
+            res.status(400).json({ 
+              message: `Referenced asset with ID ${referencedAssetId} must be of type with ID ${referencedTypeId}` 
+            });
+            return;
+          }
+
+          // Store the reference
+          await connection.query(
+            'INSERT INTO attribute_value (asset_id, attribute_id, value, created_at) VALUES (?, ?, ?, NOW())',
+            [instanceId, attribute_id, referencedAssetId.toString()]
+          );
+        } else {
+          // For non-reference attributes, validate and store the value
+          const trimmedValue = (value || '').trim();
           if (attribute.format_data) {
             try {
               const regex = new RegExp(attribute.format_data);
@@ -743,14 +856,12 @@ router.post('/instances', asyncHandler(async (req: Request, res: Response) => {
     // Get all attributes and their values
     const [instanceAttributes] = await connection.query<RowDataPacket[]>(`
       WITH RECURSIVE asset_chain AS (
-        -- Start with current instance's parent
         SELECT id, name, id_parent, 1 as level
         FROM asset 
         WHERE id = ?
         
         UNION ALL
         
-        -- Get all ancestors
         SELECT p.id, p.name, p.id_parent, ac.level + 1
         FROM asset p
         JOIN asset_chain ac ON p.id = ac.id_parent
@@ -836,7 +947,10 @@ router.get('/categories/roots', asyncHandler(async (_req: Request, res: Response
 
         return {
           ...category,
-          attributes: attributes || [],
+          attributes: attributes.map(attr => ({
+            ...attr,
+            is_reference: Boolean(attr.is_reference)  // Ensure boolean type
+          })) || [],
           hasChildren: hasChildren[0].count > 0
         };
       })
@@ -901,8 +1015,9 @@ router.get('/categories/:parentId/children', asyncHandler(async (req: Request, r
           FROM asset_chain ac
           JOIN asset a ON a.id = ac.id
           JOIN variable_attribute va ON va.asset_id = ac.id
-          ORDER BY va.name
-        `, [category.id, category.id]);
+          ORDER BY va.name`,
+          [category.id, category.id]
+        );
 
         // Check if this category has children that are also categories
         const [hasChildren] = await connection.query<RowDataPacket[]>(
@@ -915,7 +1030,10 @@ router.get('/categories/:parentId/children', asyncHandler(async (req: Request, r
 
         return {
           ...category,
-          attributes: attributes || [],
+          attributes: attributes.map(attr => ({
+            ...attr,
+            is_reference: Boolean(attr.is_reference)  // Ensure boolean type
+          })) || [],
           hasChildren: hasChildren[0].count > 0
         };
       })
@@ -1098,6 +1216,49 @@ router.delete('/:id/attributes/:attributeId', asyncHandler(async (req: Request, 
   }
 }));
 
+// Get all available assets that can be referenced
+router.get('/available-references', asyncHandler(async (req: Request, res: Response) => {
+  const { excludeId } = req.query;
+  const connection = await pool.getConnection();
+
+  try {
+    let query = `
+      SELECT a.*, 
+        COALESCE(GROUP_CONCAT(p.name ORDER BY hierarchy.level DESC SEPARATOR ' > '), a.name) as full_path
+      FROM asset a
+      LEFT JOIN (
+        WITH RECURSIVE hierarchy AS (
+          SELECT id, name, id_parent, 0 as level
+          FROM asset
+          WHERE id = a.id_parent
+          
+          UNION ALL
+          
+          SELECT p.id, p.name, p.id_parent, h.level + 1
+          FROM asset p
+          INNER JOIN hierarchy h ON h.id_parent = p.id
+        )
+        SELECT * FROM hierarchy
+      ) hierarchy ON TRUE
+      LEFT JOIN asset p ON p.id = hierarchy.id
+      WHERE 1=1
+    `;
+    
+    const params: any[] = [];
+    if (excludeId) {
+      query += ' AND a.id != ? AND a.id_parent != ?';
+      params.push(excludeId, excludeId);
+    }
+    
+    query += ' GROUP BY a.id ORDER BY full_path';
+    
+    const [assets] = await connection.query<RowDataPacket[]>(query, params);
+    res.json(assets);
+  } finally {
+    connection.release();
+  }
+}));
+
 // Get referenced assets for an attribute value
 router.get('/:assetId/attributes/:attributeId/references', asyncHandler(async (req: Request, res: Response) => {
   const { assetId, attributeId } = req.params;
@@ -1128,12 +1289,33 @@ router.get('/:assetId/attributes/:attributeId/references', asyncHandler(async (r
       return;
     }
 
-    // Get all referenced assets
-    const [references] = await connection.query<RowDataPacket[]>(
-      `SELECT a.*, ar.is_deleted, ar.deleted_at 
-       FROM attribute_asset_reference ar
-       JOIN asset a ON ar.referenced_asset_id = a.id
-       WHERE ar.attribute_value_id = ?`,
+    // Get all referenced assets with their full paths
+    const [references] = await connection.query<RowDataPacket[]>(`
+      SELECT 
+        a.*,
+        ar.is_deleted,
+        ar.deleted_at,
+        COALESCE(GROUP_CONCAT(p.name ORDER BY hierarchy.level DESC SEPARATOR ' > '), a.name) as full_path
+      FROM attribute_asset_reference ar
+      JOIN asset a ON ar.referenced_asset_id = a.id
+      LEFT JOIN (
+        WITH RECURSIVE hierarchy AS (
+          SELECT id, name, id_parent, 0 as level
+          FROM asset
+          WHERE id = a.id_parent
+          
+          UNION ALL
+          
+          SELECT p.id, p.name, p.id_parent, h.level + 1
+          FROM asset p
+          INNER JOIN hierarchy h ON h.id_parent = p.id
+        )
+        SELECT * FROM hierarchy
+      ) hierarchy ON TRUE
+      LEFT JOIN asset p ON p.id = hierarchy.id
+      WHERE ar.attribute_value_id = ?
+      GROUP BY a.id
+      ORDER BY full_path`,
       [attributeValueId]
     );
 
@@ -1164,6 +1346,13 @@ router.post('/:assetId/attributes/:attributeId/references', asyncHandler(async (
       return;
     }
 
+    // Prevent self-referencing
+    if (assetId === referencedAssetId) {
+      await connection.rollback();
+      res.status(400).json({ message: 'An asset cannot reference itself' });
+      return;
+    }
+
     // Get or create attribute value record
     let [attributeValues] = await connection.query<RowDataPacket[]>(
       'SELECT id FROM attribute_value WHERE asset_id = ? AND attribute_id = ?',
@@ -1182,11 +1371,31 @@ router.post('/:assetId/attributes/:attributeId/references', asyncHandler(async (
       attributeValueId = attributeValues[0].id;
     }
 
-    // Add the reference
-    await connection.query(
-      'INSERT INTO attribute_asset_reference (attribute_value_id, referenced_asset_id) VALUES (?, ?)',
+    // Check if reference already exists
+    const [existingRef] = await connection.query<RowDataPacket[]>(
+      'SELECT id, is_deleted FROM attribute_asset_reference WHERE attribute_value_id = ? AND referenced_asset_id = ?',
       [attributeValueId, referencedAssetId]
     );
+
+    if (existingRef[0]) {
+      if (existingRef[0].is_deleted) {
+        // If it exists but was deleted, undelete it
+        await connection.query(
+          'UPDATE attribute_asset_reference SET is_deleted = FALSE, deleted_at = NULL WHERE id = ?',
+          [existingRef[0].id]
+        );
+      } else {
+        await connection.rollback();
+        res.status(400).json({ message: 'Reference already exists' });
+        return;
+      }
+    } else {
+      // Add the new reference
+      await connection.query(
+        'INSERT INTO attribute_asset_reference (attribute_value_id, referenced_asset_id) VALUES (?, ?)',
+        [attributeValueId, referencedAssetId]
+      );
+    }
 
     await connection.commit();
     res.status(201).json({ message: 'Reference added successfully' });

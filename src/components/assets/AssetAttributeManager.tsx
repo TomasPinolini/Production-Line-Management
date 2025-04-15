@@ -23,14 +23,33 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
   const [newAttribute, setNewAttribute] = useState({
     name: '',
     description: '',
-    format_data: ''
+    format_data: '',
+    is_reference: false
   });
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  const [isSelectingReference, setIsSelectingReference] = useState(false);
+  const [categoryLevels, setCategoryLevels] = useState<Array<{
+    categoryId: number | null;
+    options: Array<{
+      id: number;
+      name: string;
+      hasChildren: boolean;
+    }>;
+  }>>([{ categoryId: null, options: [] }]);
 
   useEffect(() => {
     if (assetId) {
       loadAttributes();
     }
   }, [assetId]);
+
+  useEffect(() => {
+    if (isSelectingReference) {
+      fetchRootCategories();
+    }
+  }, [isSelectingReference]);
 
   const loadAttributes = async () => {
     try {
@@ -93,38 +112,100 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
     }
   };
 
-  const handleAddAttribute = async () => {
+  const fetchRootCategories = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/assets/categories/roots`);
+      if (!response.ok) throw new Error('Failed to load root categories');
+      const data = await response.json();
+      setCategoryLevels([{ categoryId: null, options: data }]);
+    } catch (err) {
+      console.error('Error fetching root categories:', err);
+      toast.error('Failed to load categories');
+    }
+  };
+
+  const fetchChildCategories = async (parentId: number) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/assets/categories/${parentId}/children`);
+      if (!response.ok) throw new Error('Failed to load child categories');
+      return await response.json();
+    } catch (err) {
+      console.error('Error fetching child categories:', err);
+      toast.error('Failed to load child categories');
+      return [];
+    }
+  };
+
+  const handleCategoryChange = async (levelIndex: number, categoryId: number | null) => {
+    try {
+      const updatedLevels = [...categoryLevels.slice(0, levelIndex + 1)];
+      updatedLevels[levelIndex] = {
+        ...updatedLevels[levelIndex],
+        categoryId
+      };
+
+      if (categoryId !== null) {
+        const selectedCat = categoryLevels[levelIndex].options.find(cat => cat.id === categoryId);
+        if (selectedCat?.hasChildren) {
+          const childCategories = await fetchChildCategories(categoryId);
+          updatedLevels.push({ categoryId: null, options: childCategories });
+        }
+      }
+
+      setCategoryLevels(updatedLevels);
+    } catch (err) {
+      console.error('Error handling category change:', err);
+      toast.error('Failed to load category data');
+    }
+  };
+
+  const handleAddAttribute = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assetId) return;
+
+    // Get the selected category from any level
+    const selectedCategory = categoryLevels.reduce<{ id: number; name: string; hasChildren: boolean } | null>((selected, level) => {
+      if (level.categoryId !== null) {
+        const category = level.options.find(cat => cat.id === level.categoryId);
+        if (category) return category;
+      }
+      return selected;
+    }, null);
+
     try {
       const response = await fetch(`${API_BASE_URL}/assets/${assetId}/attributes`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(newAttribute),
+        body: JSON.stringify({
+          name: newAttribute.name,
+          description: newAttribute.description,
+          format_data: newAttribute.is_reference 
+            ? `ref:${selectedCategory?.id || ''}` // Store reference type in format_data
+            : newAttribute.format_data
+        }),
       });
 
-      if (!response.ok) throw new Error('Failed to add attribute');
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.message || 'Failed to add attribute');
+      }
 
-      const addedAttribute = await response.json();
-
-      // Update the state
-      setAttributeGroups(prev => prev.map(group => {
-        if (group.assetId === assetId) {
-          return {
-            ...group,
-            attributes: [...group.attributes, addedAttribute]
-          };
-        }
-        return group;
-      }));
-
-      setIsAddModalOpen(false);
-      setNewAttribute({ name: '', description: '', format_data: '' });
       toast.success('Attribute added successfully');
-      if (onAttributesChange) onAttributesChange();
-    } catch (error) {
-      console.error('Error adding attribute:', error);
-      toast.error('Failed to add attribute');
+      setIsAddModalOpen(false);
+      setNewAttribute({
+        name: '',
+        description: '',
+        format_data: '',
+        is_reference: false
+      });
+      setIsSelectingReference(false);
+      setCategoryLevels([{ categoryId: null, options: [] }]);
+      loadAttributes();
+    } catch (err) {
+      console.error('Error adding attribute:', err);
+      toast.error(err instanceof Error ? err.message : 'Failed to add attribute');
     }
   };
 
@@ -259,78 +340,116 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
 
       {/* Add Attribute Modal */}
       {isAddModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full">
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-semibold">Add New Attribute</h2>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <CloseIcon className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Name
-                </label>
-                <input
-                  type="text"
-                  value={newAttribute.name}
-                  onChange={(e) =>
-                    setNewAttribute((prev) => ({ ...prev, name: e.target.value }))
-                  }
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                />
+        <div className="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-6 max-w-lg w-full">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">
+              Add New Attribute
+            </h3>
+            <form onSubmit={handleAddAttribute}>
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Name
+                  </label>
+                  <input
+                    type="text"
+                    value={newAttribute.name}
+                    onChange={(e) => setNewAttribute(prev => ({ ...prev, name: e.target.value }))}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Description
+                  </label>
+                  <input
+                    type="text"
+                    value={newAttribute.description}
+                    onChange={(e) => setNewAttribute(prev => ({ ...prev, description: e.target.value }))}
+                    className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Attribute Type
+                  </label>
+                  <div className="mt-2">
+                    <label className="inline-flex items-center">
+                      <input
+                        type="checkbox"
+                        checked={newAttribute.is_reference}
+                        onChange={(e) => {
+                          setNewAttribute(prev => ({ ...prev, is_reference: e.target.checked }));
+                          setIsSelectingReference(e.target.checked);
+                          if (!e.target.checked) {
+                            setCategoryLevels([{ categoryId: null, options: [] }]);
+                          }
+                        }}
+                        className="rounded border-gray-300 text-blue-600 shadow-sm focus:border-blue-500 focus:ring-blue-500"
+                      />
+                      <span className="ml-2 text-sm text-gray-700">Reference to another asset</span>
+                    </label>
+                  </div>
+                </div>
+
+                {newAttribute.is_reference ? (
+                  <div className="space-y-4">
+                    <h4 className="text-sm font-medium text-gray-700">Select Asset Type to Reference</h4>
+                    <p className="text-sm text-gray-500">You can select an asset type from any level in the hierarchy.</p>
+                    {categoryLevels.map((level, index) => (
+                      <div key={index} className="flex items-center space-x-2">
+                        <select
+                          value={level.categoryId || ''}
+                          onChange={(e) => handleCategoryChange(index, e.target.value ? parseInt(e.target.value) : null)}
+                          className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                        >
+                          <option value="">Select {index === 0 ? 'Category' : 'Subcategory'}</option>
+                          {level.options.map(cat => (
+                            <option key={cat.id} value={cat.id}>
+                              {cat.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Format Pattern (regex)
+                    </label>
+                    <input
+                      type="text"
+                      value={newAttribute.format_data}
+                      onChange={(e) => setNewAttribute(prev => ({ ...prev, format_data: e.target.value }))}
+                      className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
+                      placeholder="e.g., ^[A-Za-z0-9]+$"
+                    />
+                  </div>
+                )}
               </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Description
-                </label>
-                <input
-                  type="text"
-                  value={newAttribute.description}
-                  onChange={(e) =>
-                    setNewAttribute((prev) => ({
-                      ...prev,
-                      description: e.target.value,
-                    }))
-                  }
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">
-                  Format (regex)
-                </label>
-                <input
-                  type="text"
-                  value={newAttribute.format_data}
-                  onChange={(e) =>
-                    setNewAttribute((prev) => ({
-                      ...prev,
-                      format_data: e.target.value,
-                    }))
-                  }
-                  className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 sm:text-sm"
-                />
-              </div>
-              <div className="flex justify-end space-x-3 mt-6">
+              <div className="mt-5 sm:mt-6 sm:grid sm:grid-cols-2 sm:gap-3">
                 <button
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md shadow-sm hover:bg-gray-50"
+                  type="button"
+                  onClick={() => {
+                    setIsAddModalOpen(false);
+                    setIsSelectingReference(false);
+                    setCategoryLevels([{ categoryId: null, options: [] }]);
+                  }}
+                  className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:text-sm"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={handleAddAttribute}
-                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md shadow-sm hover:bg-blue-700"
+                  type="submit"
+                  disabled={newAttribute.is_reference && !categoryLevels.some(level => level.categoryId !== null)}
+                  className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 sm:text-sm"
                 >
                   Add Attribute
                 </button>
               </div>
-            </div>
+            </form>
           </div>
         </div>
       )}
