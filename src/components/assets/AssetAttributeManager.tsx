@@ -159,25 +159,29 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
     if (!editingAttribute) return;
 
     try {
-      const response = await fetch(`${API_BASE_URL}/assets/${assetId}/attributes/${editingAttribute.id}`, {
+      const response = await fetch(`${API_BASE_URL}/assets/${assetId}/attributes/${editingAttribute.id}/definition`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(editingAttribute),
+        body: JSON.stringify({
+          name: editingAttribute.name,
+          description: editingAttribute.description,
+          format_data: editingAttribute.format_data
+        }),
       });
 
       if (!response.ok) throw new Error('Failed to update attribute');
 
       const updatedAttribute = await response.json();
 
-      // Update the state
+      // Update the state with the updated attribute
       setAttributeGroups(prev => prev.map(group => {
         if (group.assetId === assetId) {
           return {
             ...group,
             attributes: group.attributes.map(attr =>
-              attr.id === updatedAttribute.id ? updatedAttribute : attr
+              attr.id === editingAttribute.id ? updatedAttribute : attr
             )
           };
         }
@@ -185,7 +189,7 @@ const AssetAttributeManager: React.FC<Props> = ({ assetId, onAttributesChange })
       }));
 
       setEditingAttribute(null);
-      toast.success('Attribute updated successfully');
+      toast.success('Attribute definition updated successfully');
       if (onAttributesChange) onAttributesChange();
     } catch (error) {
       console.error('Error updating attribute:', error);
